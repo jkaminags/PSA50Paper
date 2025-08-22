@@ -15,8 +15,6 @@ df_low_short <- data.frame(
 mod_low_short <- lm(y ~ poly(x, 2) + 
                       poly(x_inv, 3), data = df_low_short)
 
-plot(y ~ x, df_low_short)
-
 # slow responder decreases to 0.5 ng/mL at 9 months
 df_low_slow <- data.frame(
   x = c(-0.5, 0, 0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
@@ -194,13 +192,13 @@ mod_high_slow_adj <- lm(y ~ poly(x, 3) +
 # low_short_corr <- c()
 # for (i in 1:1000) {
 #   baseline <- rnorm(30, mean = 4, sd = 0.5)
-#   
-  # FUP <- 0.90 * (
-  #   predict(mod_low_short, newdata = data.frame(x = 4,
-  #                                               x_inv = 1/5))[[1]]
-  # ) + (0.10 * baseline) + (0.2 * rnorm(30, mean = 0, sd = 0.18))
-  # FUP <- ifelse(FUP < 0, 0, FUP)
-#   
+# 
+#   FUP <- 0.90 * (
+#     predict(mod_low_short_adj, newdata = data.frame(x = 4,
+#                                                 x_inv = 1/5))[[1]]
+#   ) + (0.10 * baseline) + (0.2 * rnorm(30, mean = 0, sd = 1.2))
+#   FUP <- ifelse(FUP < 0, 0, FUP)
+# 
 #   low_short_corr <- c(low_short_corr, cor(baseline, FUP))
 # }
 # 
@@ -341,3 +339,24 @@ mod_high_slow_adj <- lm(y ~ poly(x, 3) +
 # }
 # 
 # sum(high_non_corr) / 1000
+
+
+
+
+## Redefine polynomials based on real data ??
+# time <- rep(seq(0:12), each = 30)
+# baseline = rnorm(30, 100, 10)
+# FUP <- c()
+# for (i in 1:12) {
+#   FUP_curr <- 0.90 * (predict(mod_high_short_adj, newdata =
+#                                 data.frame(x = i,
+#                                            x_inv = 1/(i + 1)))) +
+#     (0.10 * baseline) + (0.2 * rnorm(30, mean = 0, sd = 23.5))
+# 
+#   FUP_curr <- ifelse(FUP_curr < 0, 0, FUP_curr)
+#   FUP <- c(FUP, FUP_curr)
+# }
+# dftemp <- data.frame(time = time,
+#                      PSA = c(baseline, FUP))
+# 
+# plot(PSA ~ time, data = dftemp)

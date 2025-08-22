@@ -1,11 +1,12 @@
 ---
-title: "sims"
+title: "Run PSA Simulations"
 format: html
 ---
 
 ```{r}
+set.seed(314)
+
 library(tidyverse)
-library(fda.usc) # for AUC calculations
 source("sim_functions.R")
 source("polynomial_PSA.R")
 ```
@@ -31,17 +32,17 @@ normalized AUC: is there a difference in adjusted AUC betwene grp A and grp B? (
 half-life: no test, just present half lives for different scenarios
 
 NULL HYPOTHESIS - NO DIFFERENCE BETWEN GRP A and B - RESPONDER CURVES
-0.33, 0.33, 0.34
+0.33, 0.33, 0.34 - 1
 (treatment mildly effective)
-0.60, 0, 0.40,
-0.40, 0, 0.60,
+0.60, 0, 0.40, - 2
+0.40, 0, 0.60, -3 
 (treatment highly effective)
-0.80, 0, 0.20,
-0.20, 0, 0.80,
+0.80, 0, 0.20, - 4
+0.20, 0, 0.80, - 5
 (treatment unevenly effective)
-0.5, 0.2, 0.3
-0.2, 0.5, 0.3
-0.2, 0.2, 0.6
+0.5, 0.2, 0.3 - 6
+0.2, 0.5, 0.3 - 7
+0.2, 0.2, 0.6 - 8
 
 ALTERNATIVE HYPOTHESIS - GRP A AND B DIFFER - RESPONDER CURVES
 -note: showing that PSA50 is a metric that misses a lot of information
@@ -67,13 +68,19 @@ props <- list(
   c(6, 0, 24), c(15, 6, 9), c(6, 15, 9), c(6, 6, 18)
 )
 
+props_sample <- seq(1:8)
+
+# Each vector's components represent the type of response curve
+# proportion for A and B respectively
+props_alt <- list(
+  c(1, 2), c(3, 2), c(5, 4), c(8, 6),
+  c(8, 7), c(1, 6), c(1, 7), c(8, 4)
+)
+
 # left to right: 0.2, 0.4, 0.6, 0.8 correlation
 low_corrs <- c(1.2, 0.55, 0.32, 0.18)
 med_corrs <- c(7, 3.3, 2, 1.1)
 high_corrs <- c(23.5, 11.1, 6.5, 3.7)
-
-# vector for randomly sampling proportions
-props_sample <- seq(1,8)
 
 # defining results vectors for simulation
 hypothesis <- rep(c(rep("Null", 15000), rep("Alternative", 15000)), 4)
@@ -85,9 +92,9 @@ fisher_res <- c()
 perchange_res <- c()
 rawchange_res <- c()
 ancova_res <- c()
-raw_AUC <- c()
-norm_AUC <- c()
-half_life <- c()
+raw_AUC_res <- c()
+norm_AUC_res <- c()
+half_life_res <- c()
 ```
 
 
@@ -105,129 +112,6 @@ psa_data |> filter(subject == unique(subject)[35]) |>
   ggplot(aes(x = months, y = std_value)) + geom_point()
 ```
 
-## THIS IS FOR REDEFINING POLYNOMIALS BASED ON REALDATA
-```{r}
-# df_low_short_adj <- data.frame(
-#   x = c(-0.5, 0, 0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
-#   y = c(8, 4, 2, 1, 0.75, 0.61, 0.5, 0.4, 0.45, 
-#         0.50, 0.59, 0.70, 0.83, 0.95, 1.1, 1.21, 1.4)
-# ) |>
-#   mutate(x_inv = 1/(x+1))
-# 
-# plot(y ~ x, data = df_low_short_adj)
-# mod_low_short_adj <- lm(y ~ poly(x, 2) + 
-#                       poly(x_inv, 3), data = df_low_short_adj)
-
-# left to right: 0.2, 0.4, 0.6, 0.8 correlation
-# low_corrs <- c(1.2, 0.55, 0.32, 0.18)
-# med_corrs <- c(7, 3.3, 2, 1.1)
-# high_corrs <- c(23.5, 11.1, 6.5, 3.7)
-
-
-# df_low_slow_adj <- data.frame(
-#   x = c(-0.5, 0, 0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
-#   y = c(5, 4, 3.3, 2.8, 2.1, 1.65, 1.31, 0.95, 0.7, 
-#         0.58, 0.52, 0.5, 0.55, 0.66, 0.85, 1.1, 1.5)
-# ) |>
-#   mutate(x_inv = 1/(x+1))
-# 
-# mod_low_slow_adj <- lm(y ~ poly(x, 2) + 
-#                      poly(x_inv, 3), data = df_low_slow_adj)
-# 
-# plot(y ~ x, data = df_low_slow_adj)
-# 
-# df_med_short_adj <- data.frame(
-#   x = c(-0.5, 0, 0.5, 1, 2, 3, 3.5, 3.5, 4, 4, 4, 4,
-#         5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
-#   y = c(30, 20, 12.5, 8, 5.5, 4.3, 4, 4, 3.8, 3.8, 3.8, 3.8, 4, 
-#         4.15, 4.3, 4.48, 4.95, 5.35, 5.85, 6.3, 6.95, 7.6)
-# ) |>
-#   mutate(x_inv = 1/(x+1))
-# 
-# mod_med_short_adj <- lm(y ~ poly(x, 2) + 
-#                       poly(x_inv, 3), data = df_med_short_adj)
-
-# df_med_slow_adj <- data.frame(
-#   x = c(-0.5, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
-#   y = c(28, 20, 14.5, 11, 9, 7.2, 6.1, 5,
-#         4.55, 4.15, 4, 4.1, 4.7, 5.5, 6.6, 8)
-# ) |>
-#   mutate(x_inv = 1/(x+1))
-# 
-# mod_med_slow_adj <- lm(y ~ poly(x, 2) +
-#                      poly(x_inv, 3), data = df_med_slow_adj)
-
-# df_high_short_adj <- data.frame(
-#   x = c(-0.5, 0, 0.5, 1, 2, 3, 3.5, 3.5, 4, 4, 4, 4,
-#         5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
-#   y = c(120, 100, 70, 49, 33, 28, 26, 26, 25, 25, 25, 25, 
-#         25.5, 26.3, 27.5, 29, 30.5, 32, 34, 36.5, 38, 40)
-# ) |>
-#   mutate(x_inv = 1/(x+1))
-# 
-# 
-# mod_high_short_adj <- lm(y ~ poly(x, 3) + 
-#                        poly(x_inv, 3), data = df_high_short_adj)
-# 
-# plot(y ~ x, data = df_high_short_adj)
-# 
-# df_high_slow_adj <- data.frame(
-#   x = c(-0.5, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
-#   y = c(110, 100, 70, 56, 48, 40.5, 34, 30, 
-#         27, 25.5, 25, 26.5, 28.6, 32, 36, 40)
-# ) |>
-#   mutate(x_inv = 1/(x+1))
-# 
-# mod_high_slow_adj <- lm(y ~ poly(x, 3) + 
-#                       poly(x_inv, 3), data = df_high_slow_adj)
-# 
-# time <- rep(seq(0:12), each = 30)
-# baseline = rnorm(30, 100, 10)
-# FUP <- c()
-# for (i in 1:12) {
-#   FUP_curr <- 0.90 * (predict(mod_high_short_adj, newdata =
-#                                 data.frame(x = i,
-#                                            x_inv = 1/(i + 1)))) +
-#     (0.10 * baseline) + (0.2 * rnorm(30, mean = 0, sd = 23.5))
-# 
-#   FUP_curr <- ifelse(FUP_curr < 0, 0, FUP_curr)
-#   FUP <- c(FUP, FUP_curr)
-# }
-# dftemp <- data.frame(time = time,
-#                      PSA = c(baseline, FUP))
-# 
-# plot(PSA ~ time, data = dftemp)
-```
-
-```{r}
-df_psa <- generate_PSA_sim(
-  20, 3, 20, 3, props[[4]], props[[4]], 1.2
-)
-
-temp <- df_psa |> filter(id == 1) |>
-  ggplot(aes(x = time, y = PSA)) + geom_point()
-
-pk.calc.half.life(temp$PSA, temp$time, tmax = 0, allow.tmax.in.half.life = TRUE)
-sNCA(temp$time, temp$PSA)
-
-temp$log_conc <- log(temp$PSA)
-
-coef(lm(log_conc ~ time, data = temp))[2]
-
-log(2)/coef(lm(log_conc ~ time, data=temp))[2]
-
-nls(PSA ~ SSasymp(time, 4, 20, log_alpha), data = temp)
-
-# 0.4097
-# log alpha = 0.409
-exp(0.409)
-log(2) / exp(0.409)
-```
-
-
-
-
-
 ## Month 3
 
 ### Null Simulation
@@ -242,7 +126,7 @@ total for all sims at 3, 6, 9, and 12 - 120,000
 - correlations of 0.2, 0.4, 0.6, and 0.8
 - month 3: 5,000 null w/ 1250 at 0.2 correlation, 1250 at 0.4, 1250 at 0.6, 1250 at 0.8. 5,000 alternative w/ same distribution
 ```{r}
-# low simulation
+############## Low Baseline PSA ##############
 corr_num <- 1
 
 for (i in 1:5000) {
@@ -253,6 +137,8 @@ for (i in 1:5000) {
   
   # Randomly samples a null response curve distribution for A and B
   response <- sample(props_sample, 1)
+  a_prop <- c(a_prop, response)
+  b_prop <- c(b_prop, response)
   
   # Dataframe of simulated PSA values for all months
   df_psa_sim <- generate_PSA_sim(
@@ -273,16 +159,23 @@ for (i in 1:5000) {
   rawchange_sim <- raw_change_test(df_psa_wide)
   ancova_sim <- ancova_test(df_psa_wide)
   
-  
   # raw AUC, normalized AUC, and half-life are calculated as a whole
   # each is calculated individually and then averaged
   raw_auc <- raw_auc_calc(df_psa_sim)
   norm_auc <- norm_auc_calc(df_psa_sim)
-  # add in half life calculation
+  halflife <- halflife_calc(df_psa_sim)
+  
+  # add simulated test results to overall results
+  fisher_res <- c(fisher_res, fisher_sim)
+  perchange_res <- c(perchange_res, perchange_sim)
+  rawchange_res <- c(rawchange_res, rawchange_sim)
+  ancova_res <- c(ancova_res, ancova_sim)
+  raw_AUC_res <- c(raw_AUC_res, raw_auc)
+  norm_AUC_res <- c(norm_AUC_res, norm_auc)
+  half_life_res <- c(half_life_res, halflife)
 }
 
-
-# medium simulation
+############## Medium Baseline PSA ##############
 corr_num <- 1
 
 for (i in 1:5000) {
@@ -291,21 +184,216 @@ for (i in 1:5000) {
   }
   
   response <- sample(props_sample, 1)
+  a_prop <- c(a_prop, response)
+  b_prop <- c(b_prop, response)
   
+  df_psa_sim <- generate_PSA_sim(
+    20, 3, 20, 3, props[[response]], props[[response]], low_corrs[corr_num]
+  )
+  
+  df_psa_wide <- df_psa_sim |> filter(time == 0 | time == 3) |>
+      pivot_wider(names_from = time, values_from = PSA) |>
+      mutate(baseline = `0`,
+             FUP = `3`,
+             change = baseline - FUP,
+             psa50_achieved = (change/baseline) >= 0.50
+      )
+  
+  fisher_sim <- fisher_sim_test(df_psa_wide)
+  perchange_sim <- perchange_sim_test(df_psa_wide)
+  rawchange_sim <- raw_change_test(df_psa_wide)
+  ancova_sim <- ancova_test(df_psa_wide)
+  raw_auc <- raw_auc_calc(df_psa_sim)
+  norm_auc <- norm_auc_calc(df_psa_sim)
+  halflife <- halflife_calc(df_psa_sim)
+  
+  fisher_res <- c(fisher_res, fisher_sim)
+  perchange_res <- c(perchange_res, perchange_sim)
+  rawchange_res <- c(rawchange_res, rawchange_sim)
+  ancova_res <- c(ancova_res, ancova_sim)
+  raw_AUC_res <- c(raw_AUC_res, raw_auc)
+  norm_AUC_res <- c(norm_AUC_res, norm_auc)
+  half_life_res <- c(half_life_res, halflife)
   
 }
 
-# high simulation
+############## High Baseline PSA ##############
+corr_num <- 1
+
+for (i in 1:5000) {
+  if (i %% 1250 == 0) {
+    corr_num <- corr_num + 1
+  }
+  
+  response <- sample(props_sample, 1)
+  a_prop <- c(a_prop, response)
+  b_prop <- c(b_prop, response)
+  
+  df_psa_sim <- generate_PSA_sim(
+    100, 10, 100, 10, props[[response]], props[[response]], low_corrs[corr_num]
+  )
+  
+  df_psa_wide <- df_psa_sim |> filter(time == 0 | time == 3) |>
+      pivot_wider(names_from = time, values_from = PSA) |>
+      mutate(baseline = `0`,
+             FUP = `3`,
+             change = baseline - FUP,
+             psa50_achieved = (change/baseline) >= 0.50
+      )
+  
+  fisher_sim <- fisher_sim_test(df_psa_wide)
+  perchange_sim <- perchange_sim_test(df_psa_wide)
+  rawchange_sim <- raw_change_test(df_psa_wide)
+  ancova_sim <- ancova_test(df_psa_wide)
+  raw_auc <- raw_auc_calc(df_psa_sim)
+  norm_auc <- norm_auc_calc(df_psa_sim)
+  halflife <- halflife_calc(df_psa_sim)
+  
+
+  fisher_res <- c(fisher_res, fisher_sim)
+  perchange_res <- c(perchange_res, perchange_sim)
+  rawchange_res <- c(rawchange_res, rawchange_sim)
+  ancova_res <- c(ancova_res, ancova_sim)
+  raw_AUC_res <- c(raw_AUC_res, raw_auc)
+  norm_AUC_res <- c(norm_AUC_res, norm_auc)
+  half_life_res <- c(half_life_res, halflife)
+  
+}
 ```
-
-
 
 
 
 ### Alternative Simulation
 
+```{r}
+############## Low Baseline PSA ##############
+corr_num <- 1
+
+for (i in 1:5000) {
+  # Changes correlation to simulate at
+  if (i %% 1250 == 0) {
+    corr_num <- corr_num + 1
+  }
+  
+  # Randomly samples an alternative 
+  # response curve distribution for A and B
+  response <- sample(props_alt, 1)[[1]]
+  a_prop <- c(a_prop, response[1])
+  b_prop <- c(b_prop, response[2])
+  
+  df_psa_sim <- generate_PSA_sim(
+    4, 0.5, 4, 1, props[[response[1]]], props[[response[2]]], low_corrs[corr_num]
+  )
+  
+  df_psa_wide <- df_psa_sim |> filter(time == 0 | time == 3) |>
+      pivot_wider(names_from = time, values_from = PSA) |>
+      mutate(baseline = `0`,
+             FUP = `3`,
+             change = baseline - FUP,
+             psa50_achieved = (change/baseline) >= 0.50
+      )
+  
+  fisher_sim <- fisher_sim_test(df_psa_wide)
+  perchange_sim <- perchange_sim_test(df_psa_wide)
+  rawchange_sim <- raw_change_test(df_psa_wide)
+  ancova_sim <- ancova_test(df_psa_wide)
+  raw_auc <- raw_auc_calc(df_psa_sim)
+  norm_auc <- norm_auc_calc(df_psa_sim)
+  halflife <- halflife_calc(df_psa_sim)
+  
+  fisher_res <- c(fisher_res, fisher_sim)
+  perchange_res <- c(perchange_res, perchange_sim)
+  rawchange_res <- c(rawchange_res, rawchange_sim)
+  ancova_res <- c(ancova_res, ancova_sim)
+  raw_AUC_res <- c(raw_AUC_res, raw_auc)
+  norm_AUC_res <- c(norm_AUC_res, norm_auc)
+  half_life_res <- c(half_life_res, halflife)
+}
 
 
+############## Medium Baseline PSA ##############
+corr_num <- 1
+
+for (i in 1:5000) {
+  if (i %% 1250 == 0) {
+    corr_num <- corr_num + 1
+  }
+  
+  response <- sample(props_alt, 1)[[1]]
+  a_prop <- c(a_prop, response[1])
+  b_prop <- c(b_prop, response[2])
+  
+  df_psa_sim <- generate_PSA_sim(
+    20, 3, 20, 3, props[[response[1]]], props[[response[1]]], low_corrs[corr_num]
+  )
+
+  df_psa_wide <- df_psa_sim |> filter(time == 0 | time == 3) |>
+      pivot_wider(names_from = time, values_from = PSA) |>
+      mutate(baseline = `0`,
+             FUP = `3`,
+             change = baseline - FUP,
+             psa50_achieved = (change/baseline) >= 0.50
+      )
+  
+  fisher_sim <- fisher_sim_test(df_psa_wide)
+  perchange_sim <- perchange_sim_test(df_psa_wide)
+  rawchange_sim <- raw_change_test(df_psa_wide)
+  ancova_sim <- ancova_test(df_psa_wide)
+  raw_auc <- raw_auc_calc(df_psa_sim)
+  norm_auc <- norm_auc_calc(df_psa_sim)
+  halflife <- halflife_calc(df_psa_sim)
+  
+  fisher_res <- c(fisher_res, fisher_sim)
+  perchange_res <- c(perchange_res, perchange_sim)
+  rawchange_res <- c(rawchange_res, rawchange_sim)
+  ancova_res <- c(ancova_res, ancova_sim)
+  raw_AUC_res <- c(raw_AUC_res, raw_auc)
+  norm_AUC_res <- c(norm_AUC_res, norm_auc)
+  half_life_res <- c(half_life_res, halflife)
+}
+
+
+############## High Baseline PSA ##############
+corr_num <- 1
+
+for (i in 1:5000) {
+  if (i %% 1250 == 0) {
+    corr_num <- corr_num + 1
+  }
+  
+  response <- sample(props_alt, 1)[[1]]
+  a_prop <- c(a_prop, response[1])
+  b_prop <- c(b_prop, response[2])
+  
+  df_psa_sim <- generate_PSA_sim(
+    100, 10, 100, 10, props[[response[1]]], props[[response[2]]], low_corrs[corr_num]
+  )
+  
+  df_psa_wide <- df_psa_sim |> filter(time == 0 | time == 3) |>
+      pivot_wider(names_from = time, values_from = PSA) |>
+      mutate(baseline = `0`,
+             FUP = `3`,
+             change = baseline - FUP,
+             psa50_achieved = (change/baseline) >= 0.50
+      )
+  
+  fisher_sim <- fisher_sim_test(df_psa_wide)
+  perchange_sim <- perchange_sim_test(df_psa_wide)
+  rawchange_sim <- raw_change_test(df_psa_wide)
+  ancova_sim <- ancova_test(df_psa_wide)
+  raw_auc <- raw_auc_calc(df_psa_sim)
+  norm_auc <- norm_auc_calc(df_psa_sim)
+  halflife <- halflife_calc(df_psa_sim)
+  
+  fisher_res <- c(fisher_res, fisher_sim)
+  perchange_res <- c(perchange_res, perchange_sim)
+  rawchange_res <- c(rawchange_res, rawchange_sim)
+  ancova_res <- c(ancova_res, ancova_sim)
+  raw_AUC_res <- c(raw_AUC_res, raw_auc)
+  norm_AUC_res <- c(norm_AUC_res, norm_auc)
+  half_life_res <- c(half_life_res, halflife)
+}
+```
 
 
 

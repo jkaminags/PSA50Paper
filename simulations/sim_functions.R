@@ -365,3 +365,42 @@ norm_auc_calc <- function(df_psa_sim) {
   
   return(auc_total / 60)
 }
+
+
+get_fit_alpha <- function(df_patient) {
+  # try to fit exponential decay to PSA values
+  # if too little values to fit - return NA
+  tryCatch(
+    {
+      fit <- nls(PSA ~ SSasymp(time, yf, y0, log_alpha), 
+                 data = df_patient)
+      return(log(2) / exp(coef(fit)[3]))
+    },
+    error = function(e){
+      return(NA)
+    }
+  )
+}
+
+halflife_calc <- function(df_psa_sim) {
+  halflife <- 0
+  num_patients <- 0
+  
+  for (i in 1:60) {
+    df_patient <- df_psa_sim |>
+      filter(id == 1) |>
+      mutate(log_conc = log(PSA))
+    
+    # subset to only the terminal decreasing part of curve
+    df_patient <- df_patient[1:which(df_patient$log_conc ==
+                                       min(df_patient$log_conc)),]
+    
+    halflife_curr <- get_fit_alpha(df_patient)
+    if (!is.na(halflife_curr)) {
+      halflife <- halflife + halflife_curr
+      num_patients <- num_patients + 1
+    }
+  }
+  
+  return(halflife / num_patients)
+}

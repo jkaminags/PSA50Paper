@@ -1,0 +1,272 @@
+---
+title: "sims"
+format: html
+---
+
+
+```{r}
+set.seed(1)
+
+library(tidyverse)
+source("sim_functions.R")
+# 10,000 iterations - low baseline PSA NULL hypothesis
+# group A: baseline PSA N(4, 0.5) -> FUP PSA N(4, 0.5) - N(0, 2)
+# group B: baseline PSA N(4, 0.5) -> FUP PSA N(4, 0.5) - N(0, 4)
+# this is for type I error
+# ideal: bounded by 0.10
+
+fisher_results_low_null <- c()
+log_results_low_null <- c()
+raw_alpha_low_null <- c()
+after_alpha_low_null <- c()
+
+
+for (i in 1:10000) {
+  # generate simulation PSA dataframe
+  df_psa_sim <- generate_PSA_sim(4, 0.5, 4, 0.5,
+                                 0, 2, 0, 4)
+  
+  # Save a random simulation dataframe for visualization
+  if(i == 10) {
+    saveRDS(df_psa_sim, file = "data/df_psa_sim_low_null.RDS")
+  }
+  
+  # do fisher exact test
+  fisher_sim <- fisher_sim_test(df_psa_sim)
+  
+  # do log percentage exact test
+  log_percent_sim <- log_percent_test(df_psa_sim)
+  
+  raw_sim <- raw_diff_test(df_psa_sim)
+  after_sim <- raw_after_test(df_psa_sim)
+  
+  # record results
+  fisher_results_low_null <- c(fisher_results_low_null, fisher_sim)
+  log_results_low_null <- c(log_results_low_null, log_percent_sim)
+  raw_alpha_low_null <- c(raw_alpha_low_null, raw_sim)
+  after_alpha_low_null <- c(after_alpha_low_null, after_sim)
+}
+
+
+# low baseline PSA ALTERNATIVE hypothesis
+# group A: baseline PSA N(4, 0.5) -> FUP PSA N(4, 0.5) - N(0, 2)
+# group B: baseline PSA N(4, 0.5) -> FUP PSA N(4, 0.5) - N(2.5, 2)
+# this is for power
+# ideal: 90% power
+fisher_pow_low_null <- c()
+log_pow_low_null <- c()
+raw_pow_low <- c()
+after_pow_low <- c()
+
+for (i in 1:10000) {
+  # generate simulation PSA dataframe
+  df_psa_sim <- generate_PSA_sim(4, 0.5, 4, 0.5,
+                                 0, 2, 2.5, 2)
+  
+  # Save a random simulation dataframe for visualization
+  if(i == 10) {
+    saveRDS(df_psa_sim, file = "data/df_psa_sim_low_alt.RDS")
+  }
+  
+  # do fisher exact test
+  fisher_sim <- fisher_sim_test(df_psa_sim)
+  
+  # do log percentage exact test
+  log_percent_sim <- log_percent_test(df_psa_sim)
+  
+  raw_sim <- raw_diff_test(df_psa_sim)
+  after_sim <- raw_after_test(df_psa_sim)
+  
+  # record results
+  fisher_pow_low_null <- c(fisher_pow_low_null, fisher_sim)
+  log_pow_low_null <- c(log_pow_low_null, log_percent_sim)
+  raw_pow_low <- c(raw_pow_low, raw_sim)
+  after_pow_low <- c(after_pow_low, after_sim)
+}
+
+
+fisher_alpha <- sum(fisher_results_low_null < 0.10) / 10000
+log_alpha <- sum(log_results_low_null < 0.10) / 10000
+
+fisher_power <- sum(fisher_pow_low_null < 0.10) / 10000
+log_power <- sum(log_pow_low_null < 0.10) / 10000
+
+raw_alpha <- sum(raw_alpha_low_null < 0.10) / 10000
+raw_power <- sum(raw_pow_low < 0.10) / 10000
+
+after_alpha <- sum(after_alpha_low_null < 0.10) / 10000
+after_power <- sum(after_pow_low < 0.10) / 10000
+```
+
+
+
+```{r}
+# 10,000 iterations - medium baseline NULL hypothesis
+# group A: baseline N(20, 5) -> FUP PSA N(20, 5) - N(0, 10)
+# group B: baseline N(20, 5) -> FUP PSA N(20, 5) - N(0, 15)
+
+fisher_alpha_med_null <- c()
+log_alpha_med_null <- c()
+raw_alpha_med_null <- c()
+after_alpha_med_null <- c()
+
+for (i in 1:10000) {
+  # generate simulation PSA dataframe
+  df_psa_sim <- generate_PSA_sim(20, 5, 20, 5,
+                                 0, 10, 0, 15)
+  
+  # Save a random simulation dataframe for visualization
+  if(i == 10) {
+    saveRDS(df_psa_sim, file = "data/df_psa_sim_med_null.RDS")
+  }
+  
+  # do fisher exact test
+  fisher_sim <- fisher_sim_test(df_psa_sim)
+  
+  # do log percentage exact test
+  log_percent_sim <- log_percent_test(df_psa_sim)
+  
+  raw_sim <- raw_diff_test(df_psa_sim)
+  after_sim <- raw_after_test(df_psa_sim)
+  
+  # record results
+  fisher_alpha_med_null <- c(fisher_alpha_med_null, fisher_sim)
+  log_alpha_med_null <- c(log_alpha_med_null, log_percent_sim)
+  raw_alpha_med_null <- c(raw_alpha_med_null, raw_sim)
+  after_alpha_med_null <- c(after_alpha_med_null, raw_sim)
+}
+
+
+# 10,000 iterations - medium baseline ALTERNATIVE hypothesis
+# group A: baseline PSA N(20, 5) -> FUP PSA N(20, 5) - N(0, 10)
+# group B: baseline N(20, 5) -> FUP PSA N(20, 5) - N(15, 10)
+fisher_pow_med <- c()
+log_pow_med <- c()
+raw_pow_med <- c()
+after_pow_med <- c()
+
+for (i in 1:10000) {
+  # generate simulation PSA dataframe
+  df_psa_sim <- generate_PSA_sim(20, 5, 20, 5,
+                                 0, 10, 15, 10)
+  
+  # Save a random simulation dataframe for visualization
+  if(i == 10) {
+    saveRDS(df_psa_sim, file = "data/df_psa_sim_med_alt.RDS")
+  }
+  
+  # do fisher exact test
+  fisher_sim <- fisher_sim_test(df_psa_sim)
+  
+  # do log percentage exact test
+  log_percent_sim <- log_percent_test(df_psa_sim)
+  
+  raw_sim <- raw_diff_test(df_psa_sim)
+  after_sim <- raw_after_test(df_psa_sim)
+  
+  # record results
+  fisher_pow_med <- c(fisher_pow_med, fisher_sim)
+  log_pow_med <- c(log_pow_med, log_percent_sim)
+  raw_pow_med <- c(raw_pow_med, raw_sim)
+  after_pow_med <- c(after_pow_med, after_sim)
+}
+
+
+fisher_alpha_med <- sum(fisher_alpha_med_null < 0.10) / 10000
+log_alpha_med <- sum(log_alpha_med_null < 0.10) / 10000
+
+fisher_power_med <- sum(fisher_pow_med < 0.10) / 10000
+log_power_med <- sum(log_pow_med < 0.10) / 10000
+
+raw_alpha_med <- sum(raw_alpha_med_null < 0.10) / 10000
+raw_power_med <- sum(raw_pow_med < 0.10) / 10000
+
+after_alpha_med <- sum(after_alpha_med_null < 0.10) / 10000
+after_power_med <- sum(after_pow_med < 0.10) / 10000
+```
+
+
+```{r}
+# 10,000 iterations - high baseline NULL hypothesis
+# group A: baseline N(100, 20) -> FUP PSA N(100, 20) - N(0, 30)
+# group B: baseline N(100, 20) -> FUP PSA N(100, 20) - N(0, 50)
+fisher_alpha_high_null <- c()
+log_alpha_high_null <- c()
+raw_alpha_high_null <- c()
+after_alpha_high_null <- c()
+
+for (i in 1:10000) {
+  # generate simulation PSA dataframe
+  df_psa_sim <- generate_PSA_sim(100, 20, 100, 20,
+                                 0, 30, 0, 50)
+  
+  # Save a random simulation dataframe for visualization
+  if(i == 10) {
+    saveRDS(df_psa_sim, file = "data/df_psa_sim_high_null.RDS")
+  }
+  
+  # do fisher exact test
+  fisher_sim <- fisher_sim_test(df_psa_sim)
+  
+  # do log percentage exact test
+  log_percent_sim <- log_percent_test(df_psa_sim)
+  
+  raw_sim <- raw_diff_test(df_psa_sim)
+  after_sim <- raw_after_test(df_psa_sim)
+  
+  # record results
+  fisher_alpha_high_null <- c(fisher_alpha_high_null, fisher_sim)
+  log_alpha_high_null <- c(log_alpha_high_null, log_percent_sim)
+  raw_alpha_high_null <- c(raw_alpha_high_null, raw_sim)
+  after_alpha_high_null <- c(after_alpha_high_null, after_sim)
+}
+
+
+
+# 10,000 iterations - high baseline ALTERNATIVE hypothesis
+# group A: baseline N(100, 20) -> FUP PSA N(100, 20) - N(0, 30)
+# group B: baseline N(100, 20) -> FUP PSA N(100, 20) - N(60, 30)
+fisher_pow_high <- c()
+log_pow_high <- c()
+raw_pow_high <- c()
+after_pow_high <- c()
+
+for (i in 1:10000) {
+  # generate simulation PSA dataframe
+  df_psa_sim <- generate_PSA_sim(100, 20, 100, 20,
+                                 0, 30, 60, 30)
+  
+  # Save a random simulation dataframe for visualization
+  if(i == 10) {
+    saveRDS(df_psa_sim, file = "data/df_psa_sim_high_alt.RDS")
+  }
+  
+  # do fisher exact test
+  fisher_sim <- fisher_sim_test(df_psa_sim)
+  
+  # do log percentage exact test
+  log_percent_sim <- log_percent_test(df_psa_sim)
+  
+  raw_sim <- raw_diff_test(df_psa_sim)
+  after_sim <- raw_after_test(df_psa_sim)
+  
+  # record results
+  fisher_pow_high <- c(fisher_pow_high, fisher_sim)
+  log_pow_high <- c(log_pow_high, log_percent_sim)
+  raw_pow_high <- c(raw_pow_high, raw_sim)
+  after_pow_high <- c(after_pow_high, after_sim)
+}
+
+
+fisher_alpha_high <- sum(fisher_alpha_high_null < 0.10) / 10000
+log_alpha_high <- sum(log_alpha_high_null < 0.10) / 10000
+
+fisher_power_high <- sum(fisher_pow_high < 0.10) / 10000
+log_power_high <- sum(log_pow_high < 0.10) / 10000
+
+raw_alpha_high <- sum(raw_alpha_high_null < 0.10) / 10000
+raw_power_high <- sum(raw_pow_high < 0.10) / 10000
+
+after_alpha_high <- sum(after_alpha_high_null < 0.10) / 10000
+after_power_high <- sum(after_pow_high < 0.10) / 10000
+```

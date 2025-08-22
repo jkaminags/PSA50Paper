@@ -1,0 +1,190 @@
+---
+title: "PSA50 is a Statistically Incorrect Endpoint"
+author:
+    - name: Josephine Kaminaga
+      corresponding: true
+      email: jkaminaga@ucsb.edu
+    - name: Travis Gerke
+      corresponding: true
+      email: gerket@mskcc.org
+      affiliations: 
+        - PCCTC
+bibliography: references.bib
+format: pdf
+---
+
+## Abstract
+
+write this as a summary of things once done
+
+## Background
+
+A commonly used endpoint in prostate cancer clinical trials is a patient experiencing at least a 50% decrease in prostate-specific antigen (PSA) levels from baseline measurement, otherwise known as PSA50. Much of this endpoint's popularity can be attributed to the fact that it is easy to obtain and presents a straightforward metric for assessing the impact of a treatment on individual patients. As an example, a search of PubMed revealed 93 out of 197 prosState cancer clinical trials in 2024 used PSA50 as either a primary or secondary endpoint, while 866 out of 3515 prostate cancer trials registered on the US government website ClinicalTrials.gov made similar use of PSA50 (@kaminaga_2025_search_pubmed, @kaminaga_2025_search_psa, @kaminaga_2025_search_ct). [EDIT THIS!!!!]
+
+PSA50 and other change in PSA endpoints are often reported as a percentage of patients achieving the endpoint, either in plain text (e.g. "75% of patients on treatment achieved a PSA50 response") or as a comparison between two treatment arms with simple statistical tests such as the Fisher exact test or the Mann-Whitney U test. (WE PROBABLY DON'T NEED ALL OF THIS) This practice ignores the seven critical assumptions defined in @harrell_2025_biostatistics that are needed to correctly perform these tests on change from baseline data. One key assumption violated by the very nature of a measure of percent change in PSA is that there should be no floor and ceiling effects within the data. By definition, PSA measures can never be negative. It follows that the greatest possible percent reduction in PSA levels is 100% - from the baseline value to a value of 0 ng/mL. PSA change values and endpoint percentages are thus subject to a ceiling effect with the greatest possible values both being 100%. Beyond violating the ceiling effect assumption, percent change in PSA is a relative measure dependent on a patient's baseline PSA. This dependence means a patient with a baseline PSA of 50 ng/mL achieves PSA50 with a decrease to 25 ng/mL, and this is measured as clinically equivalent to a patient with baseline PSA 4 ng/mL decreasing to 2 ng/mL. It is evident that using PSA50 as an endpoint metric draws inaccurate equivalences between drastically different decreases in objective PSA levels.
+
+```{r}
+#| warning: FALSE
+#| message: FALSE
+#| echo: FALSE
+set.seed(4)
+library(tidyverse)
+
+df_psa_problem_init <- data.frame(
+  psa_levels = c(
+    rnorm(30, mean = 100, sd = 5),
+    rnorm(30, mean = 1, sd = 5),
+    rnorm(30, mean = 100, sd = 5),
+    rnorm(30, mean = 40, sd = 5)
+  ),
+  group = c(
+    rep("B", 60),
+    rep("A", 60)
+  ),
+  time = c(
+    rep(0, 30),
+    rep(1, 30),
+    rep(0, 30),
+    rep(1, 30)
+  ),
+  patient_id = c(
+    seq(from = 1, to = 30),
+    seq(from = 1, to = 30),
+    seq(from = 31, to = 60),
+    seq(from = 31, to = 60)
+  )
+) |>
+  mutate(
+    psa_levels = case_when(
+      psa_levels < 0 ~ 0,
+      .default = psa_levels
+    )
+  )
+
+df_psa_problem <- df_psa_problem_init |>
+  mutate(psa_baseline = c(
+    rep(
+      df_psa_problem_init |> filter(group == "B" & time == 0) |>
+        pull(psa_levels), 2),
+    rep(
+      df_psa_problem_init |> filter(group == "A" & time == 0) |>
+        pull(psa_levels), 2)
+    ),
+         psa_after = c(
+    rep(
+      df_psa_problem_init |> filter(group == "B" & time == 1) |>
+        pull(psa_levels), 2),
+    rep(
+      df_psa_problem_init |> filter(group == "A" & time == 1) |>
+        pull(psa_levels), 2)
+    ),
+         psa50_achieved = ((psa_baseline - psa_after) / psa_baseline) >= 0.50
+  )
+
+p <- df_psa_problem |>
+  ggplot(aes(x = time, y = psa_levels, col = group,
+             group = patient_id)) +
+  geom_point(alpha = 0.3) +
+  geom_line(aes(x = time, y = psa_levels), alpha = 0.2) +
+  geom_smooth(
+    aes(x = time, y = psa_levels, group = group),
+    color = "black",
+    alpha = 0.8,
+    se = FALSE,
+    method = lm) +
+  scale_x_continuous(
+    breaks = c(0, 1),
+    labels = c("Baseline", "Follow-Up")
+  ) +
+  labs(x = "", y = "PSA level (ng/mL)",
+       col = "Treatment Grp.") +
+  guides(col = guide_legend(override.aes = list(alpha = 1))) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(size = 12, color = "black")
+  )
+
+psa50_test <- 
+  df_psa_problem |>
+  select(group, patient_id, psa50_achieved) |>
+  distinct() |>
+  summarise(.by = group,
+            psa50_no = sum(!psa50_achieved),
+            psa50_yes = sum(psa50_achieved)) |>
+  select(psa50_no, psa50_yes) |>
+  as.matrix() |>
+  fisher.test()
+```
+
+An intuitive example of the problems with percent change in PSA can easily be illustrated. Let us conduct a two-arm clinical trial for comparison between the standard of care, drug A, and a promising new drug B. 30 patients are allocated to each arm such that the median baseline PSA value in each arm is 100 ng/mL. In drug A's arm, the median PSA value at 6 weeks follow-up is 40 ng/mL, while in drug B's arm, the median PSA value at 6 weeks follow-up is 1 ng/mL. We ascertain that 30 out of 30 (100%) of patients achieved PSA50 on drug A, and 29 out of 30 (97%) of patients achieved the same on drug B. Though drug B seems to reduce PSA values much more than drug A, Fisher's exact test for difference in PSA50 percentages between drug A and drug B returns a p-value of `r psa50_test$p.value`. The superior performance of drug B is completely ignored by standard evaluations of change from baseline PSA.
+
+(add in figure 1 and caption labels later!!)
+
+```{r}
+#| message: FALSE
+#| echo: FALSE
+p
+```
+
+It has been demonstrated that the usage of PSA50 and similar metrics overlooks significant differences in objective PSA reduction between groups and is not fit for statistical testing. Beyond the theoretical and practical problems with using percent change from baseline to measure PSA improvement, there is also a glaring problem with its usage as a primary and secondary endpoint for efficacy in clinical trials. @bland_2011_comparisons, @vickers_2001_the, and @kaiser_1989_adjusting all show that percentage change from baseline is severely underpowered (and other things??>) (ACTUSLLY EWE DON'T NEED THSI). CITE SPECIFIC NUMBERS FROM SIMULATION AND COMPARE TO AVERAGE TRIAL EXPECTATIONS FOR TESTS
+
+What is needed is a metric for PSA reduction which meets the following criteria: 1) retention of the clinical interpretability of PSA50, 2) statistical robustness, and 3) ability to meet standard clinical trial parameters of 90% power with a 0.10 Type I error rate. EDIT THIS
+
+we propose the log ratio of each patient averaged across groups, then comparing those log ratios with a t test for mean log ratio of each group. compare to fisher exact test.
+
+
+-psa50 is bad for inference, we're glad to see nobody really does that
+-however PSA50 ios also reductionist, misses a lot of information in the data on how PSA changes over time, PSA50 lumps together different types of PSA response curves which are known to be significant to survival
+-therefore we propose these differents metric e.g raw change and AUC to supplement information and offer a statistically robust option for performing inference on PSA changes between two treatment groups
+-could mention ANCOVA as a suggestion that people have pushed for change score analysis. however, the assumption of linearity does not hold for ANCOVA.
+-statistical/medical literature has said change scores/percentage change is bad. most of these papers focus on the power/inference aspect, however, we show that the larger problem in the context of PSA50 usage in prostate cancer research is its theoretical interpretation and loss of valuable information regarding PSA kinetics. we propose XYZ metrics that retain more information and can be easily used alongside PSA50.
+
+step 1: significant difference in PSA reduction between treatment A and B
+step 2: percentage representation of this difference (e.g. patients on treatment B experienced PSA reduction of X log percent from baseline, which was significantly different from the PSA reduction on treatment A)
+
+
+at each time point, we compare Fisher exact test for detecting difference in reaching PSA50 vs. % change vs. raw change from baseline vs. ANCOVA to see if it still works in nonlinearity, add in AUC and normalized AUC
+
+- months 3, 6, 9 and 12
+- 10,000 times for null, 10,000 times for alternative
+- correlations of 0.2, 0.4, 0.6, and 0.8
+- month 3: 10,000 null w/ 2500 at 0.2 correlation, 2500 at 0.4, 2500 at 0.6, 2500 at 0.8. 10,000 alternative w/ same distribution
+- same for months 6 9 and 12
+- ultimately: 80,000 simulations for one group of baseline
+-responder curves: e.g. grp A: 70% slow responder, 30% nonresponder, grp B: 40% slow responder, 60% nonresponder
+
+repeat above procedure for medium and high baseline values -> 240,000 simulations total
+
+-figure out how to do auc calculations for each simulation of PSA response curves
+-keep track of responder curves for each simulation columns: short response, slow response, non response (each proportions)
+-CITATIONS: find something about correlation in PSA baseline and change to justify correlation simulations, https://ar.iiarjournals.org/content/42/1/165 for why PSA response curves are important, https://onlinelibrary.wiley.com/doi/10.1111/iju.70019 for example of PSA response curves, ANCOVA linearity assumption, usefulness of AUC as a PK metric
+
+## Methods
+
+FIRST: READ AND PERFORM SIMULATIONS FOR POWER OF LOG RATIO VS FISHER EXACT TEST
+
+-small paragraph about how we searched PubMed and clinicaltrial.gov website + search terms
+
+
+-paragraph about how PSA50 is commonly used (t tests). why is this wrong? what incorrect conclusions does it lead to? reference to proofs for the more mathematically minded of us.
+-paragraph about how we could use PSA50 instead - ANCOVA if we still want to measure PSA50, log ratio for if we want interpretable and easily presentable PSA numbers. why log ratio? to balance the skewed nature of PSA levels where metastatic prostate cancer patients will quite often have PSA levels in the hundreds and even thousands.
+-transition: a simulation study is conducted in this paper to show solid evidence that any percentage change endpoint for PSA is flawed.
+
+
+### Simulations of Type I and Type II Error Rates
+-how did we set up simulation study?
+
+## Results
+
+-how do the alpha and beta from simulation study methods compare to each other?
+-table 4x3 of comparison of Type I error and power for Fisher vs. log percent, three columns 1 for low, medium and high
+
+## Discussion
+
+-2-3 paragraphs of talking abt the implications of moving away from PSA50.
+
+## Conclusion
+
+-re-summarize results, provide recommendations

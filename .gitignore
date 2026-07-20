@@ -1,1 +1,8 @@
 .Rproj.user
+
+# Copyrighted reference PDFs — local only, never commit/upload
+resources/
+
+# OS / R session junk
+.DS_Store
+.Rhistory

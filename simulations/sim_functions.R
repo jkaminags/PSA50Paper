@@ -14,11 +14,9 @@ generate_PSA_sim <- function(
   time <- c(rep(0, 60), rep(2, 60), rep(3, 60), rep(4, 60),
             rep(6, 60), rep(8, 60), rep(9, 60), rep(12, 60))
   
-  # generate grp A baseline
-  baseline_A <- rnorm(30, baseline_mean_A, baseline_sd_A)
-  
-  # generate grp B baseline
-  baseline_B <- rnorm(30, baseline_mean_B, baseline_sd_B)
+  # baselines floored at 0.1 ng/mL for the same reason (see generate_PSA_FUP)
+  baseline_A <- pmax(rnorm(30, baseline_mean_A, baseline_sd_A), 0.1)
+  baseline_B <- pmax(rnorm(30, baseline_mean_B, baseline_sd_B), 0.1)
   
   # generate grp A follow-up PSA at 3, 6, 9, and 12 months
   # add in measurement timepoints to reflect CASCARA data
@@ -160,7 +158,10 @@ generate_PSA_FUP_adj <- function(
   
   psa_change <- c(psa_short, psa_slow, psa_non) |> sample()
   
-  return(psa_FUP + psa_change)
+  # floor at 0.1 ng/mL, the functional sensitivity of a standard clinical PSA
+  # assay: keeps PSA positive so the log-scale tests stay defined. Non-binding
+  # at mCRPC PSA levels; ultrasensitive assays are a post-prostatectomy tool.
+  return(pmax(psa_FUP + psa_change, 0.1))
 }
 
 generate_PSA_FUP <- function(
@@ -241,7 +242,10 @@ generate_PSA_FUP <- function(
   
   psa_change <- c(psa_short, psa_slow, psa_non)
   
-  return(psa_FUP + psa_change)
+  # floor at 0.1 ng/mL, the functional sensitivity of a standard clinical PSA
+  # assay: keeps PSA positive so the log-scale tests stay defined. Non-binding
+  # at mCRPC PSA levels; ultrasensitive assays are a post-prostatectomy tool.
+  return(pmax(psa_FUP + psa_change, 0.1))
 }
 
 fisher_sim_test <- function(df_psa_wide) {
@@ -261,22 +265,21 @@ fisher_sim_test <- function(df_psa_wide) {
 }
 
 
-log_percent_test <- function(df_psa_sim) {
-  df_log_test <- df_psa_sim |>
-    select(group, patient_id, psa_baseline, psa_after) |>
-    distinct()
-  
-  # calculate log change percent for A
-  df_A <- df_log_test |> filter(group == "A")
-  log_change_A <- (log(df_A$psa_after) - log(df_A$psa_baseline)) * 100
-  
-  # calculate log change percent for B
-  df_B <- df_log_test |> filter(group == "B")
-  log_change_B <- (log(df_B$psa_after) - log(df_B$psa_baseline)) * 100
-  
+# log-ratio t-test on the log (sympercent) scale. This is still an UNADJUSTED
+# change score, so it stays regression-to-the-mean prone; it is kept as a
+# comparator to show it underperforms the baseline-adjusted log_ancova_test.
+log_percent_test <- function(df_psa_wide) {
+  log_change_A <- df_psa_wide |> filter(group == "A") |>
+    mutate(log_change = (log(FUP) - log(baseline)) * 100) |>
+    pull(log_change)
+
+  log_change_B <- df_psa_wide |> filter(group == "B") |>
+    mutate(log_change = (log(FUP) - log(baseline)) * 100) |>
+    pull(log_change)
+
   # perform t.test(var.equal = FALSE) on them
   log_test <- t.test(log_change_A, log_change_B, var.equal = FALSE)
-  
+
   # return p-value
   return(log_test$p.value)
 }
@@ -314,8 +317,21 @@ perchange_sim_test <- function(df_psa_wide) {
 # ancova_test
 ancova_test <- function(df_psa_wide) {
   mod <- aov(FUP ~ baseline + group, data = df_psa_wide)
-  
+
   # return p-value for group effect after controlling for baseline
+  return(anova(mod)[[5]][2])
+}
+
+
+# log-scale ANCOVA: the recommended inference method (Vickers 2001,
+# Kaiser 1989, Cole 2000). Adjusts follow-up for baseline on the log scale,
+# where PSA is closer to normal and the baseline relationship closer to
+# linear; the group effect back-transforms to a sympercent (symmetric
+# percent change) for interpretation.
+log_ancova_test <- function(df_psa_wide) {
+  mod <- aov(log(FUP) ~ log(baseline) + group, data = df_psa_wide)
+
+  # return p-value for group effect after adjusting for log baseline
   return(anova(mod)[[5]][2])
 }
 
@@ -388,7 +404,7 @@ halflife_calc <- function(df_psa_sim) {
   
   for (i in 1:60) {
     df_patient <- df_psa_sim |>
-      filter(id == 1) |>
+      filter(id == i) |>
       mutate(log_conc = log(PSA))
     
     # subset to only the terminal decreasing part of curve

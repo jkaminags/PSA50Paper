@@ -1,5 +1,5 @@
 ---
-title: "PSA50 is a Statistically Incorrect Endpoint"
+title: "PSA50 is a Statistically Inefficient and Information-Losing Endpoint"
 author:
     - name: Josephine Kaminaga
       corresponding: true
@@ -7,28 +7,104 @@ author:
     - name: Travis Gerke
       corresponding: true
       email: gerket@mskcc.org
-      affiliations: 
+      affiliations:
         - PCCTC
 bibliography: references.bib
 format: pdf
 ---
 
+```{r}
+#| label: setup
+#| include: FALSE
+library(tidyverse)
+library(gt)
+
+eff <- readRDS("simulations/data/sim_results_efficiency.RDS")
+rob <- readRDS("simulations/data/sim_results_robustness.RDS")
+
+test_labels <- c(
+  log_ancova = "Log-scale ANCOVA",
+  log_ratio  = "Log ratio (t-test)",
+  perchange  = "% change (t-test)",
+  fisher     = "PSA50 (Fisher exact)",
+  ancova     = "ANCOVA (raw scale)",
+  rawchange  = "Raw change (t-test)"
+)
+scale_of <- c(log_ancova = "log", log_ratio = "log",
+              perchange = "percent", fisher = "percent (binary)",
+              ancova = "raw", rawchange = "raw")
+
+h        <- eff$headline
+nf       <- round(as.numeric(h$n_star_fisher))
+nl       <- round(as.numeric(h$n_star_logancova))
+mult     <- as.numeric(h$multiplier)
+disc     <- as.numeric(h$discarded_frac)
+delta_sp <- abs(h$sympercent)
+delta_pc <- round((1 - exp(eff$meta$delta)) * 100)
+alpha_pct <- eff$meta$alpha * 100
+n_sim    <- eff$meta$M
+
+dstep   <- function(s) round(eff$decomp$patients_per_arm[eff$decomp$step == s])
+d_dich  <- dstep("dichotomization")
+d_sa    <- dstep("scale_and_adjustment")
+d_scale <- dstep("scale_swap")
+d_adj   <- dstep("baseline_adjustment")
+
+# N* for 80% power, ordered best to worst
+nstar_tbl <- eff$nstar |>
+  mutate(analysis = test_labels[test], scale = scale_of[test],
+         relative = n_star / nl) |>
+  arrange(n_star) |>
+  select(analysis, scale, n_star, relative)
+
+# calibrated power vs sample size
+p_power <- eff$curve |>
+  mutate(test = factor(test_labels[test], levels = test_labels)) |>
+  ggplot(aes(n, cal_power, color = test)) +
+  geom_hline(yintercept = eff$meta$target, linetype = 2, color = "grey55") +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 1) +
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent_format()) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Patients per arm", y = "Power (calibrated to 10% type I error)",
+       color = NULL) +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(), legend.position = "right")
+
+# regression-to-the-mean panel
+rtm_gap <- eff$rtm_panel |>
+  filter(test %in% c("perchange", "log_ratio", "log_ancova")) |>
+  pivot_wider(names_from = test, values_from = cal_power) |>
+  mutate(scale_gain = log_ancova - perchange) |>
+  arrange(desc(s_b), rho)
+gap_min <- min(rtm_gap$scale_gain)
+gap_max <- max(rtm_gap$scale_gain)
+
+# adversarial robustness (analyses as rows, scenarios as columns)
+rob_tbl <- rob$robustness |>
+  mutate(analysis = factor(test_labels[test], levels = test_labels)) |>
+  select(analysis, scenario, cal_power) |>
+  pivot_wider(names_from = scenario, values_from = cal_power) |>
+  arrange(analysis)
+```
+
 ## Abstract
 
-write this as a summary of things once done
+Prostate-specific antigen (PSA) response, usually defined as a decline of at least 50% from baseline (PSA50), is among the most common endpoints in prostate cancer trials, reported as the proportion of responders and compared between arms with a Fisher exact test. The endpoint makes two separate design choices that harm a trial along two independent axes. It analyzes change on the percentage scale, which depends on baseline PSA, is right-skewed, and is prone to regression to the mean; this costs statistical efficiency. And it dichotomizes a continuous trajectory into a yes-or-no flag, so that a 51% and a 95% decline count the same; this discards the shape of the response. Using a simulation calibrated so that every test controls type I error at the same level, we quantify the efficiency cost. To reach 80% power for a `r round(delta_sp)`-sympercent treatment effect, PSA50 needs about `r nf` patients per arm against about `r nl` for baseline-adjusted analysis of covariance on the log scale, a `r round(mult, 1)`-fold difference, equivalent to discarding roughly half the trial. Decomposing the gap shows that nearly all of it comes from the percentage-change scale rather than from dichotomization: a continuous percentage-change analysis, the usual alternative to a responder proportion, is almost as inefficient as PSA50 itself. The log-scale advantage is a regression-to-the-mean effect and persists under raw-additive treatment effects and heavy-tailed error. Dichotomization's distinctive cost is not power but information, because it erases the response kinetics that a continuous analysis keeps. We recommend analyzing PSA with log-scale analysis of covariance, reporting the effect as a symmetric percentage difference, and pairing it with kinetic summaries such as the area under the PSA curve. These choices keep the clinical meaning of a PSA decline while recovering the efficiency and the response-shape information PSA50 removes.
 
 ## Background
 
-A commonly used endpoint in prostate cancer clinical trials is a patient experiencing at least a 50% decrease in prostate-specific antigen (PSA) levels from baseline measurement, otherwise known as PSA50. Much of this endpoint's popularity can be attributed to the fact that it is easy to obtain and presents a straightforward metric for assessing the impact of a treatment on individual patients. As an example, a search of PubMed revealed 93 out of 197 prosState cancer clinical trials in 2024 used PSA50 as either a primary or secondary endpoint, while 866 out of 3515 prostate cancer trials registered on the US government website ClinicalTrials.gov made similar use of PSA50 (@kaminaga_2025_search_pubmed, @kaminaga_2025_search_psa, @kaminaga_2025_search_ct). [EDIT THIS!!!!]
+A commonly used endpoint in prostate cancer clinical trials is a decline of at least 50% in prostate-specific antigen (PSA) from baseline, known as PSA50. The endpoint is popular in part because it is easy to compute and gives a single, intuitive summary of whether a treatment lowered a patient's PSA. Its reach is wide: a search of PubMed identified 93 of 197 prostate cancer clinical trials published in 2024 that used PSA50 as a primary or secondary endpoint, and 866 of 3,515 prostate cancer trials registered on ClinicalTrials.gov made similar use of it [@kaminaga_2025_search_pubmed; @kaminaga_2025_search_psa; @kaminaga_2025_search_ct].
 
-PSA50 and other change in PSA endpoints are often reported as a percentage of patients achieving the endpoint, either in plain text (e.g. "75% of patients on treatment achieved a PSA50 response") or as a comparison between two treatment arms with simple statistical tests such as the Fisher exact test or the Mann-Whitney U test. (WE PROBABLY DON'T NEED ALL OF THIS) This practice ignores the seven critical assumptions defined in @harrell_2025_biostatistics that are needed to correctly perform these tests on change from baseline data. One key assumption violated by the very nature of a measure of percent change in PSA is that there should be no floor and ceiling effects within the data. By definition, PSA measures can never be negative. It follows that the greatest possible percent reduction in PSA levels is 100% - from the baseline value to a value of 0 ng/mL. PSA change values and endpoint percentages are thus subject to a ceiling effect with the greatest possible values both being 100%. Beyond violating the ceiling effect assumption, percent change in PSA is a relative measure dependent on a patient's baseline PSA. This dependence means a patient with a baseline PSA of 50 ng/mL achieves PSA50 with a decrease to 25 ng/mL, and this is measured as clinically equivalent to a patient with baseline PSA 4 ng/mL decreasing to 2 ng/mL. It is evident that using PSA50 as an endpoint metric draws inaccurate equivalences between drastically different decreases in objective PSA levels.
+That convenience carries a cost with two distinct sources, because PSA50 makes two separate design choices. It thresholds a particular quantity, percentage change from baseline, which is a poor analytic scale in its own right; and it dichotomizes a continuous PSA trajectory into a yes-or-no flag. These choices harm a trial along two independent axes. One is statistical efficiency: the trial needs more patients than it should to detect a given treatment effect. The other is clinical information: the endpoint hides the shape of a patient's response. Separating the two clarifies both what is wrong and what to do instead, and, as our simulation shows, most of the efficiency loss traces to the scale while the information loss traces to the dichotomization.
+
+Consider dichotomization first. A patient whose PSA falls by 51% and a patient whose PSA falls by 95% are both counted as responders, while a patient whose PSA falls by 49% is grouped with a patient whose PSA did not move at all. Splitting a continuous measurement into two bins this way throws away information. For a continuous predictor, dichotomizing at the median keeps roughly two thirds of the information when the variable is symmetric and closer to half when it is right-skewed, as PSA is [@royston_2006_dichotomizing; @altman_2006_cost]. Those figures describe dichotomizing a predictor rather than an outcome, so they carry over to PSA50 by analogy rather than by direct measurement, but the mechanism is the same. In metastatic castration-resistant prostate cancer specifically, @grayling_2022_improving showed that recovering the continuous PSA data underneath the binary flag roughly doubled the effective sample size of a PSA response analysis, a median efficiency gain of 103.2%. As our results below make precise, that gain comes from analyzing the continuous data on a good scale, more than from the act of not dichotomizing on its own.
 
 ```{r}
 #| warning: FALSE
 #| message: FALSE
 #| echo: FALSE
 set.seed(4)
-library(tidyverse)
 
 df_psa_problem_init <- data.frame(
   psa_levels = c(
@@ -106,85 +182,148 @@ p <- df_psa_problem |>
     axis.text.x = element_text(size = 12, color = "black")
   )
 
-psa50_test <- 
+psa50_counts <-
   df_psa_problem |>
   select(group, patient_id, psa50_achieved) |>
   distinct() |>
   summarise(.by = group,
-            psa50_no = sum(!psa50_achieved),
-            psa50_yes = sum(psa50_achieved)) |>
+            psa50_yes = sum(psa50_achieved),
+            n = n())
+
+psa50_test <-
+  psa50_counts |>
+  mutate(psa50_no = n - psa50_yes) |>
   select(psa50_no, psa50_yes) |>
   as.matrix() |>
   fisher.test()
+
+ex_a_yes <- psa50_counts |> filter(group == "A") |> pull(psa50_yes)
+ex_a_n   <- psa50_counts |> filter(group == "A") |> pull(n)
+ex_b_yes <- psa50_counts |> filter(group == "B") |> pull(psa50_yes)
+ex_b_n   <- psa50_counts |> filter(group == "B") |> pull(n)
 ```
 
-An intuitive example of the problems with percent change in PSA can easily be illustrated. Let us conduct a two-arm clinical trial for comparison between the standard of care, drug A, and a promising new drug B. 30 patients are allocated to each arm such that the median baseline PSA value in each arm is 100 ng/mL. In drug A's arm, the median PSA value at 6 weeks follow-up is 40 ng/mL, while in drug B's arm, the median PSA value at 6 weeks follow-up is 1 ng/mL. We ascertain that 30 out of 30 (100%) of patients achieved PSA50 on drug A, and 29 out of 30 (97%) of patients achieved the same on drug B. Though drug B seems to reduce PSA values much more than drug A, Fisher's exact test for difference in PSA50 percentages between drug A and drug B returns a p-value of `r psa50_test$p.value`. The superior performance of drug B is completely ignored by standard evaluations of change from baseline PSA.
-
-(add in figure 1 and caption labels later!!)
+A simple two-arm example makes the information loss concrete. Consider a trial comparing a standard-of-care drug A against a promising new drug B, with 30 patients per arm and a median baseline PSA of 100 ng/mL in each arm. At follow-up, the median PSA is 40 ng/mL under drug A and 1 ng/mL under drug B. Under PSA50, `r ex_b_yes` of `r ex_b_n` patients respond on drug B and `r ex_a_yes` of `r ex_a_n` respond on drug A, and Fisher's exact test for the difference in response proportions returns a p-value of `r round(psa50_test$p.value, 2)`. The endpoint reports the two arms as essentially identical, even though drug B drove PSA far lower. Once both arms clear the 50% threshold, the ceiling of the binary flag hides a large real difference (Figure 1).
 
 ```{r}
+#| label: fig-psa-example
+#| fig-cap: "Simulated two-arm trial in which both arms achieve near-universal PSA50 response, yet drug B lowers PSA far more than drug A. The binary endpoint treats the arms as equivalent."
 #| message: FALSE
 #| echo: FALSE
 p
 ```
 
-It has been demonstrated that the usage of PSA50 and similar metrics overlooks significant differences in objective PSA reduction between groups and is not fit for statistical testing. Beyond the theoretical and practical problems with using percent change from baseline to measure PSA improvement, there is also a glaring problem with its usage as a primary and secondary endpoint for efficacy in clinical trials. @bland_2011_comparisons, @vickers_2001_the, and @kaiser_1989_adjusting all show that percentage change from baseline is severely underpowered (and other things??>) (ACTUSLLY EWE DON'T NEED THSI). CITE SPECIFIC NUMBERS FROM SIMULATION AND COMPARE TO AVERAGE TRIAL EXPECTATIONS FOR TESTS
+The second design choice, the scale, is independent of the first and is where most of the statistical inefficiency lives. Suppose we avoid dichotomizing and analyze percentage change from baseline directly, as a continuous outcome. Percentage change is still a difficult scale for PSA. Because it is expressed relative to each patient's own baseline, it treats unequal changes as equal: a patient starting at 50 ng/mL who falls to 25 ng/mL and a patient starting at 4 ng/mL who falls to 2 ng/mL both record a 50% decline, despite absolute reductions that differ by more than an order of magnitude. Percentage change is also bounded, since PSA cannot go negative and so the largest possible decline is 100%. It is right-skewed, and its dependence on baseline invites regression to the mean, where patients with extreme baseline values tend to drift toward the average on their own. Simulation and applied work have repeatedly found percentage change from baseline to be the least efficient of the standard analysis choices and to lose power as baseline variability grows [@vickers_2001_the; @kaiser_1989_adjusting; @bland_2011_comparisons]. These are the papers most often cited against PSA50, but they address this second problem, the scale, rather than the first, the act of dichotomizing.
 
-What is needed is a metric for PSA reduction which meets the following criteria: 1) retention of the clinical interpretability of PSA50, 2) statistical robustness, and 3) ability to meet standard clinical trial parameters of 90% power with a 0.10 Type I error rate. EDIT THIS
+The information axis is clinical rather than statistical, and it is the one we think matters most for what PSA50 uniquely destroys. PSA50 summarizes an entire response trajectory by a single threshold crossing, which erases the shape of the response. Two patients can share the same PSA50 status while following very different courses, one with a fast and deep decline and one that is slow and shallow, and PSA response kinetics of this kind carry prognostic information [CITATION NEEDED: PSA kinetics / response-curve prognosis, e.g. the sources noted in the project references]. Methods that recover the efficiency lost to the binary flag, as augmentation approaches do, do not recover this shape information, because they still estimate the responder proportion. Summaries of the trajectory itself, such as the area under the PSA curve and the PSA half-life, capture what the threshold discards.
 
-we propose the log ratio of each patient averaged across groups, then comparing those log ratios with a t test for mean log ratio of each group. compare to fisher exact test.
-
-
--psa50 is bad for inference, we're glad to see nobody really does that
--however PSA50 ios also reductionist, misses a lot of information in the data on how PSA changes over time, PSA50 lumps together different types of PSA response curves which are known to be significant to survival
--therefore we propose these differents metric e.g raw change and AUC to supplement information and offer a statistically robust option for performing inference on PSA changes between two treatment groups
--could mention ANCOVA as a suggestion that people have pushed for change score analysis. however, the assumption of linearity does not hold for ANCOVA.
--statistical/medical literature has said change scores/percentage change is bad. most of these papers focus on the power/inference aspect, however, we show that the larger problem in the context of PSA50 usage in prostate cancer research is its theoretical interpretation and loss of valuable information regarding PSA kinetics. we propose XYZ metrics that retain more information and can be easily used alongside PSA50.
-
-step 1: significant difference in PSA reduction between treatment A and B
-step 2: percentage representation of this difference (e.g. patients on treatment B experienced PSA reduction of X log percent from baseline, which was significantly different from the PSA reduction on treatment A)
-
-
-at each time point, we compare Fisher exact test for detecting difference in reaching PSA50 vs. % change vs. raw change from baseline vs. ANCOVA to see if it still works in nonlinearity, add in AUC and normalized AUC
-
-- months 3, 6, 9 and 12
-- 10,000 times for null, 10,000 times for alternative
-- correlations of 0.2, 0.4, 0.6, and 0.8
-- month 3: 10,000 null w/ 2500 at 0.2 correlation, 2500 at 0.4, 2500 at 0.6, 2500 at 0.8. 10,000 alternative w/ same distribution
-- same for months 6 9 and 12
-- ultimately: 80,000 simulations for one group of baseline
--responder curves: e.g. grp A: 70% slow responder, 30% nonresponder, grp B: 40% slow responder, 60% nonresponder
-
-repeat above procedure for medium and high baseline values -> 240,000 simulations total
-
--figure out how to do auc calculations for each simulation of PSA response curves
--keep track of responder curves for each simulation columns: short response, slow response, non response (each proportions)
--CITATIONS: find something about correlation in PSA baseline and change to justify correlation simulations, https://ar.iiarjournals.org/content/42/1/165 for why PSA response curves are important, https://onlinelibrary.wiley.com/doi/10.1111/iju.70019 for example of PSA response curves, ANCOVA linearity assumption, usefulness of AUC as a PK metric
+A better analysis of PSA change should keep the clinical interpretability of a percentage decline, adjust properly for baseline, respect the skewed distribution of PSA, and reach conventional trial operating characteristics. We recommend analyzing PSA on the log scale, where its distribution is closer to normal and its relationship with baseline closer to linear, using analysis of covariance of the form `log(follow-up) ~ log(baseline) + group`. This adjusts for baseline rather than assuming that subtracting it is correct, which is the assumption a change score makes and the one regression to the mean violates. The group effect back-transforms to a symmetric percentage difference [@cole_2000_sympercents], preserving the interpretable relative-change number that makes PSA50 attractive, and we supplement it with kinetic summaries that describe the response shape.
 
 ## Methods
 
-FIRST: READ AND PERFORM SIMULATIONS FOR POWER OF LOG RATIO VS FISHER EXACT TEST
+### Prevalence of PSA-based endpoints
 
--small paragraph about how we searched PubMed and clinicaltrial.gov website + search terms
+To gauge how often PSA response endpoints are used, we searched PubMed for prostate cancer clinical trials published in 2024 and ClinicalTrials.gov for registered prostate cancer interventional trials, using PSA response terms (PSA50, PSA90, "PSA response", "PSA decline", and related variants). Search strings and dates are given in the references [@kaminaga_2025_search_pubmed; @kaminaga_2025_search_psa; @kaminaga_2025_search_ct].
 
+### Recommended analysis
 
--paragraph about how PSA50 is commonly used (t tests). why is this wrong? what incorrect conclusions does it lead to? reference to proofs for the more mathematically minded of us.
--paragraph about how we could use PSA50 instead - ANCOVA if we still want to measure PSA50, log ratio for if we want interpretable and easily presentable PSA numbers. why log ratio? to balance the skewed nature of PSA levels where metastatic prostate cancer patients will quite often have PSA levels in the hundreds and even thousands.
--transition: a simulation study is conducted in this paper to show solid evidence that any percentage change endpoint for PSA is flawed.
+The endpoint we recommend for inference is analysis of covariance on the log scale, `log(follow-up) ~ log(baseline) + group`. The log scale addresses the skewed distribution of PSA, which in metastatic disease routinely spans several orders of magnitude, and it linearizes the follow-up-versus-baseline relationship so that the covariance adjustment is appropriate. Adjusting for baseline, rather than analyzing a change score, removes the regression-to-the-mean bias that a difference-based analysis carries [@kaiser_1989_adjusting; @vickers_2001_analysing]. We report the estimated group effect back-transformed to a symmetric percentage difference on the 100 log scale [@cole_2000_sympercents], which gives a relative-change number that is additive and symmetric, unlike ordinary percentage change. Because the log-scale ANCOVA still reduces each patient to a single follow-up value, we pair it with kinetic summaries, the area under the PSA curve (raw and baseline-normalized) and the PSA half-life, which describe the response trajectory that a single-timepoint analysis cannot.
 
+### Simulation study
 
-### Simulations of Type I and Type II Error Rates
--how did we set up simulation study?
+We quantify the efficiency of each analysis choice with a simulation study built on the standard trial-design model for a skewed biomarker: PSA is log-normal, so we generate log baseline and log follow-up as bivariate normal with an explicit baseline-follow-up correlation, and the treatment arm shifts mean log follow-up by an effect whose value on the 100 log scale is a sympercent [@vickers_2001_the; @cole_2000_sympercents]. Baseline PSA has a median of 20 ng/mL, and the control arm sits at a 50% median decline so that the PSA50 flag is informative rather than saturated. This is the model under which log-scale ANCOVA is efficient by construction, so we treat it as the reference case and test its assumptions separately (below).
+
+For each analysis we compare six tests for a treatment difference: Fisher's exact test on PSA50 response, the current standard; a *t*-test on raw change from baseline; a *t*-test on percentage change from baseline; analysis of covariance on the raw scale (`follow-up ~ baseline + group`); a *t*-test on the log ratio, `100 × (log(follow-up) − log(baseline))`, which uses the correct scale but is still an unadjusted change score and is included to isolate the effect of baseline adjustment; and analysis of covariance on the log scale (`log(follow-up) ~ log(baseline) + group`), the recommended method.
+
+Two features make the comparison fair. First, the tests differ in how conservative they are at a nominal cutoff, and Fisher's exact test in particular is discrete and conservative, so a naive power comparison would confound information use with calibration. We therefore report size-adjusted power: for each test we set its rejection threshold to the value that yields exactly `r alpha_pct`% type I error under the null, estimated from a null simulation, and apply that threshold under the alternative. Every test then controls type I error at the same level, and the size adjustment removes the conservativeness penalty that would otherwise make PSA50 look worse than it is. Second, we translate power into the currency a trialist budgets against: sweeping sample size, we read off the number of patients per arm each analysis needs to reach 80% power. Each scenario uses `r format(n_sim, big.mark = ",")` replications.
+
+To separate the two axes, we decompose the sample-size gap between PSA50 and the recommended analysis into the part removed by undichotomizing (PSA50 to a continuous percentage-change test) and the part removed by fixing the scale and adjusting for baseline (percentage change to log-scale ANCOVA). We probe the scale mechanism by varying the baseline-follow-up correlation and the spread of baseline PSA, the conditions that govern regression to the mean. Finally, because the reference model favors the log scale by assumption, we re-run the comparison under two perturbations a skeptic would demand: a treatment effect that is additive on the raw ng/mL scale rather than multiplicative, and heavy-tailed (Student *t* with 3 degrees of freedom) measurement error, crossed in a two-by-two design.
 
 ## Results
 
--how do the alpha and beta from simulation study methods compare to each other?
--table 4x3 of comparison of Type I error and power for Fisher vs. log percent, three columns 1 for low, medium and high
+After calibration, every test controlled type I error at the nominal `r alpha_pct`%, so the power comparison reflects how well each analysis uses the data rather than how conservative it is. We report results for a treatment effect of `r round(delta_sp)` sympercents, a `r delta_pc`% lower geometric-mean PSA on treatment.
+
+Figure 2 plots calibrated power against sample size, and the analyses fall into two clusters. The log-scale analyses reach 80% power at much smaller samples than the percentage-change and raw-scale analyses, which bunch together at the high end of the range. Reading off the sample size for 80% power (@tbl-nstar), log-scale ANCOVA needs about `r nl` patients per arm while the binary PSA50 comparison needs about `r nf`. PSA50 therefore requires `r round(mult, 1)` times the sample of the recommended analysis for the same power, equivalent to discarding `r round(disc * 100)`% of the trial. Two choices make this gap conservative with respect to PSA50: we set the control-arm responder fraction at 50%, the point most favorable to a binary test, and we calibrated Fisher's exact test up to the nominal level, removing the penalty it pays for being conservative.
+
+```{r}
+#| label: fig-power
+#| fig-cap: !expr paste0("Calibrated power versus sample size per arm, by analysis, for a ", round(delta_sp), "-sympercent treatment effect. Every test is size-adjusted to ", alpha_pct, "% type I error. The dashed line marks 80% power.")
+#| echo: FALSE
+#| message: FALSE
+#| fig-width: 7
+#| fig-height: 4
+p_power
+```
+
+The two-cluster pattern locates the loss. Undichotomizing PSA50 into a continuous percentage-change test recovers only about `r d_dich` patients per arm. Moving from percentage change to the recommended log-scale ANCOVA recovers about `r d_sa` more, of which roughly `r d_scale` come from the scale itself (percentage to log) and `r d_adj` from adjusting for baseline rather than differencing it. Almost all of PSA50's statistical inefficiency comes from the percentage-change scale, not from the act of dichotomizing. The continuous percentage-change analysis that a trial might adopt as the responsible alternative to a responder proportion is nearly as inefficient as PSA50 itself.
+
+```{r}
+#| label: tbl-nstar
+#| tbl-cap: "Patients per arm needed for 80% power, by analysis, with sample size relative to log-scale ANCOVA. Raw change did not reach 80% power within the range examined."
+#| echo: FALSE
+nstar_tbl |>
+  gt() |>
+  fmt_number(columns = n_star, decimals = 0) |>
+  fmt_number(columns = relative, decimals = 2) |>
+  sub_missing(columns = c(n_star, relative), missing_text = ">340") |>
+  cols_label(analysis = "Analysis", scale = "Change scale",
+             n_star = "Patients per arm", relative = "× vs log-scale ANCOVA") |>
+  tab_options(table.font.size = pct(90))
+```
+
+The scale advantage is a regression-to-the-mean effect. Varying the baseline-follow-up correlation and the spread of baseline PSA (@tbl-rtm), the gain from log-scale ANCOVA over percentage change grows from about `r sprintf("%.2f", gap_min)` when baseline and follow-up are tightly correlated and baseline is homogeneous, to about `r sprintf("%.2f", gap_max)` when the correlation is weak and baseline is widely spread. Percentage change divides by a noisy baseline, so its variance inflates exactly when regression to the mean is strongest, while the baseline-adjusted log analysis is insulated from it.
+
+```{r}
+#| label: tbl-rtm
+#| tbl-cap: "Calibrated power at 110 patients per arm as regression to the mean varies, by baseline-follow-up correlation and the standard deviation of log baseline PSA. The last column is the power gain of log-scale ANCOVA over percentage change."
+#| echo: FALSE
+rtm_gap |>
+  select(rho, s_b, perchange, log_ratio, log_ancova, scale_gain) |>
+  gt() |>
+  fmt_number(columns = c(perchange, log_ratio, log_ancova, scale_gain),
+             decimals = 2) |>
+  cols_label(rho = "Correlation", s_b = "Baseline SD (log)",
+             perchange = "% change", log_ratio = "Log ratio",
+             log_ancova = "Log-scale ANCOVA", scale_gain = "Log ANCOVA − % change") |>
+  tab_options(table.font.size = pct(90))
+```
+
+The log-scale advantage is not an artifact of a model built to favor it. Under perturbations the reference model would not predict (@tbl-robust), a treatment effect that is additive on the raw ng/mL scale rather than multiplicative, and heavy-tailed measurement error, log-scale ANCOVA was the most efficient analysis in every scenario and stayed ahead of PSA50 throughout. The advantage does not depend on assuming a log-linear effect: even when the effect is additive on the raw scale, the log-scale analyses dominate, because PSA's variability is multiplicative and the resulting heteroscedasticity undermines the raw-scale tests. The binary flag has one strength, robustness to outliers, visible under heavy-tailed error where PSA50 outperforms the percentage-change and raw-scale analyses, but it still trails log-scale ANCOVA.
+
+```{r}
+#| label: tbl-robust
+#| tbl-cap: "Calibrated power at 110 patients per arm under perturbations of the reference model, crossing the scale of the treatment effect (multiplicative vs raw-additive) with the error distribution (Gaussian vs heavy-tailed t)."
+#| echo: FALSE
+rob_tbl |>
+  gt(rowname_col = "analysis") |>
+  fmt_number(columns = where(is.numeric), decimals = 2) |>
+  cols_label(
+    `Multiplicative, Gaussian`     = "Gaussian",
+    `Multiplicative, heavy-tailed` = "Heavy-tailed",
+    `Raw-additive, Gaussian`       = "Gaussian",
+    `Raw-additive, heavy-tailed`   = "Heavy-tailed"
+  ) |>
+  tab_spanner(label = "Multiplicative effect",
+              columns = c(`Multiplicative, Gaussian`, `Multiplicative, heavy-tailed`)) |>
+  tab_spanner(label = "Raw-additive effect",
+              columns = c(`Raw-additive, Gaussian`, `Raw-additive, heavy-tailed`)) |>
+  tab_options(table.font.size = pct(90))
+```
 
 ## Discussion
 
--2-3 paragraphs of talking abt the implications of moving away from PSA50.
+The two axes lead to two recommendations. On efficiency, the analysis should not live on the percentage-change scale, whether as the binary PSA50 flag or as a continuous percentage-change comparison, because both need roughly twice the sample of a log-scale analysis. It should be a baseline-adjusted analysis on the log scale, reported as a symmetric percentage difference so that the clinical interpretation survives. On information, because dichotomization is what erases the shape of the response, the trajectory itself should be reported alongside the primary analysis, through kinetic summaries such as the area under the PSA curve and the PSA half-life. The efficiency case is settled by the analysis choice; the information case is not something any single-timepoint analysis can recover.
+
+A finding worth stating plainly is that in power terms the dichotomization is nearly free, while the scale is expensive. This refines rather than contradicts the efficiency literature. @grayling_2022_improving recover a large efficiency gain by using the continuous PSA data beneath the binary flag; our decomposition shows that the gain comes from analyzing that continuous data well, on the right scale, more than from undichotomizing on the percentage scale, where the continuous analysis is almost as inefficient as the flag. The practical warning is that a trial swapping PSA50 for a continuous percentage-change analysis, a common first move, buys almost none of the available efficiency. The log scale is the lever.
+
+Our recommendation is complementary to augmentation rather than a replacement for it. @grayling_2022_improving keep the binary PSA50 estimand and make its estimation far more efficient by recovering the continuous data beneath the flag. Where investigators are committed to reporting a responder proportion, augmentation is the better way to estimate it than a raw count. What augmentation does not do is change the estimand: it still targets the proportion of patients who cross the 50% threshold, so it inherits the endpoint's blindness to response shape. Our contribution is to argue that the shape is worth analyzing directly, and to give a baseline-adjusted, interpretable way to do so.
+
+Two cautions bound what the literature supports. First, the information-retention figures from the dichotomization literature (roughly two thirds for symmetric data, roughly half for skewed) were derived for dichotomizing a predictor, not an outcome; we use them to describe the mechanism, and rely on our own simulation and on @grayling_2022_improving for the outcome-specific magnitude in PSA. Second, the well-known result that data-derived cutpoints inflate false-positive rates does not apply here, because the 50% threshold is a fixed convention rather than one chosen from the data. The argument against PSA50 is loss of efficiency and information, not cutpoint-induced bias.
+
+The efficiency estimate has boundaries worth naming. The `r round(mult, 1)`-fold figure is specific to a 50% control-arm responder fraction and a moderate treatment effect; the multiplier is stable across the correlation and baseline-spread conditions we varied, but a trial with responders concentrated near 0% or 100% would see the dichotomization cost grow, widening the gap further. The simulation also measures a single follow-up timepoint, so it speaks to the efficiency axis and not the information axis; quantifying how much prognostic signal the kinetic summaries carry, and building a per-arm test of the area under the PSA curve, is the natural next step and the one that would let the information argument be tested directly rather than argued from the trajectory's face.
+
+For a trialist, the consequence is concrete. A field that adopts a continuous, baseline-adjusted primary analysis on the log scale, reported as a symmetric percentage difference and paired with kinetic secondary endpoints, would roughly halve the sample size its PSA analyses require while keeping the clinical meaning clinicians expect and recovering the response shape the binary endpoint discards. For a patient, the same shift means the trajectory of their response, how fast and how deep, is treated as information rather than rounded to a yes or no.
 
 ## Conclusion
 
--re-summarize results, provide recommendations
+PSA50 is convenient, but the convenience comes from discarding information twice, once by dichotomizing and once by measuring change on a scale that depends on baseline. The two losses fall on different axes: the scale drives a roughly twofold loss of statistical efficiency, and the dichotomization erases the response kinetics that carry clinical meaning. For inference we recommend log-scale analysis of covariance, reported as a symmetric percentage difference, supplemented by kinetic summaries such as the area under the PSA curve. Where a responder proportion must still be reported for continuity with prior trials, it should be estimated with an augmented method rather than a raw count. These analyses retain the clinical meaning of a PSA response while recovering the efficiency and the response-shape information that the binary endpoint removes.

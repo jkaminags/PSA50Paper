@@ -10,6 +10,32 @@ library(tidyverse)
 source("sim_functions.R")
 source("polynomial_PSA.R")
 ```
+
+## Where the paper's numbers come from
+
+The paper's efficiency results (sample size for 80% power, the two-critique
+decomposition, the regression-to-the-mean panel, and the adversarial
+robustness check) come from a separate, faster engine, not from the
+mechanism-based response-curve simulation in this document. That engine and its
+two runners are:
+
+- `lognormal_functions.R` — the clean log-normal generative model (PSA is
+  log-normal; treatment shifts mean log follow-up) plus size-adjusted power.
+- `run_efficiency.R` → `data/sim_results_efficiency.RDS` — the calibrated power
+  curve, N* for 80% power, decomposition, and correlation/baseline-spread panel.
+- `run_robustness.R` → `data/sim_results_robustness.RDS` — size-adjusted power
+  under raw-additive effects and heavy-tailed error, the check that the
+  log-scale advantage is not an artifact of the log-normal assumption.
+
+Reproduce with `Rscript run_efficiency.R` and `Rscript run_robustness.R` from
+this directory. We moved the primary comparison onto this model because the
+response-curve mixture below is near-degenerate for a power comparison: its
+deterministic curves make within-arm variance large relative to the between-arm
+signal, so tests do not calibrate and the ranking reflects that rather than
+information use. The response-curve simulation is retained for the
+response-kinetics (AUC, half-life) work, which the log-normal single-timepoint
+model does not address.
+
 VARIABLES BEING CHANGED: month, correlation, responder curve distribution, and baseline PSA level
 
 - months 3, 6, 9 and 12
@@ -23,10 +49,20 @@ VARIABLES BEING CHANGED: month, correlation, responder curve distribution, and b
 -responder curves: e.g. grp A: 70% slow responder, 30% nonresponder, grp B: 40% slow responder, 60% nonresponder
 
 TESTS
+The two-critique framing (see decisions/2026-07-20-two-critique-reframe.md): PSA50 fails
+both by dichotomizing (critique 1) and by using percent change as its scale (critique 2).
+The tests below are ordered to isolate those effects. Fisher is the dichotomized status
+quo; % change is the continuous-but-unadjusted, wrong-scale option; raw change and raw
+ANCOVA move off percent change; the log-ratio t-test fixes the scale but is still an
+unadjusted change score; log-scale ANCOVA fixes both (recommended); AUC/half-life capture
+the response-kinetics information PSA50 discards regardless of scale.
+
 fisher's exact: is there a difference in PSA50 between group A and group B?
 % change: is the mean % change from baseline in grp A and grp B diferent? (ttest)
 raw change: is the raw change from baseline in grp A and grp B different? (ttest)
-ANCOVA: after controlling for baseline, is there a significant difference in the change in PSA between grp A and grp B?
+ANCOVA (raw): after controlling for baseline, is there a difference in PSA change between A and B?
+log-ratio: is the mean log ratio 100*(log(FUP)-log(baseline)) different between A and B? (ttest; unadjusted change score, kept as a comparator)
+log-scale ANCOVA: after adjusting for log(baseline), is there a group difference in log(FUP)? (recommended)
 AUC: is there a difference in RAW mean AUC between grp A and grp B? (ttest)
 normalized AUC: is there a difference in adjusted AUC betwene grp A and grp B? (ttest)
 half-life: no test, just present half lives for different scenarios
@@ -129,13 +165,9 @@ total for all sims at 3, 6, 9, and 12 - 120,000
 - month 3: 5,000 null w/ 1250 at 0.2 correlation, 1250 at 0.4, 1250 at 0.6, 1250 at 0.8. 5,000 alternative w/ same distribution
 ```{r}
 ############## Low Baseline PSA ##############
-corr_num <- 1
-
 for (i in 1:5000) {
-  # Changes correlation to simulate at
-  if (i %% 1250 == 0) {
-    corr_num <- corr_num + 1
-  }
+  # Correlation level: 1250 iterations at each of 0.2, 0.4, 0.6, 0.8
+  corr_num <- ceiling(i / 1250)
   
   # Randomly samples a null response curve distribution for A and B
   response <- sample(props_sample, 1)
@@ -182,12 +214,8 @@ for (i in 1:5000) {
 }
 
 ############## Medium Baseline PSA ##############
-corr_num <- 1
-
 for (i in 1:5000) {
-  if (i %% 1250 == 0) {
-    corr_num <- corr_num + 1
-  }
+  corr_num <- ceiling(i / 1250)
   
   response <- sample(props_sample, 1)
   a_prop <- c(a_prop, response)
@@ -228,12 +256,8 @@ for (i in 1:5000) {
 }
 
 ############## High Baseline PSA ##############
-corr_num <- 1
-
 for (i in 1:5000) {
-  if (i %% 1250 == 0) {
-    corr_num <- corr_num + 1
-  }
+  corr_num <- ceiling(i / 1250)
   
   response <- sample(props_sample, 1)
   a_prop <- c(a_prop, response)
@@ -281,13 +305,9 @@ for (i in 1:5000) {
 
 ```{r}
 ############## Low Baseline PSA ##############
-corr_num <- 1
-
 for (i in 1:5000) {
-  # Changes correlation to simulate at
-  if (i %% 1250 == 0) {
-    corr_num <- corr_num + 1
-  }
+  # Correlation level: 1250 iterations at each of 0.2, 0.4, 0.6, 0.8
+  corr_num <- ceiling(i / 1250)
   
   # Randomly samples an alternative 
   # response curve distribution for A and B
@@ -330,12 +350,8 @@ for (i in 1:5000) {
 
 
 ############## Medium Baseline PSA ##############
-corr_num <- 1
-
 for (i in 1:5000) {
-  if (i %% 1250 == 0) {
-    corr_num <- corr_num + 1
-  }
+  corr_num <- ceiling(i / 1250)
   
   response <- sample(props_alt, 1)[[1]]
   a_prop <- c(a_prop, response[1])
@@ -376,12 +392,8 @@ for (i in 1:5000) {
 
 
 ############## High Baseline PSA ##############
-corr_num <- 1
-
 for (i in 1:5000) {
-  if (i %% 1250 == 0) {
-    corr_num <- corr_num + 1
-  }
+  corr_num <- ceiling(i / 1250)
   
   response <- sample(props_alt, 1)[[1]]
   a_prop <- c(a_prop, response[1])
@@ -419,6 +431,57 @@ for (i in 1:5000) {
   norm_AUC_res <- c(norm_AUC_res, norm_auc)
   half_life_res <- c(half_life_res, halflife)
 }
+```
+
+### Summarize and save month 3 results
+
+Rejection rate at the trial's nominal Type I level (0.10): under the null this is the
+realized Type I error, under the alternative it is power. Saved for the paper to read
+(`index.qmd` loads this file rather than re-running the simulation).
+
+```{r}
+alpha <- 0.10
+n_done <- length(fisher_res)          # 30000 once month 3's null + alt loops finish
+idx <- seq_len(n_done)
+
+df_results_month3 <- tibble(
+  hypothesis  = hypothesis[idx],
+  baseline    = factor(baseline[idx], levels = c("Low", "Medium", "High")),
+  correlation = correlation[idx],
+  fisher      = fisher_res,
+  perchange   = perchange_res,
+  rawchange   = rawchange_res,
+  ancova      = ancova_res,
+  log_ratio   = log_ratio_res,
+  log_ancova  = log_ancova_res
+)
+
+gts_power_month3 <- df_results_month3 |>
+  pivot_longer(fisher:log_ancova, names_to = "test", values_to = "p") |>
+  summarise(
+    .by = c(hypothesis, baseline, correlation, test),
+    reject_rate = mean(p < alpha, na.rm = TRUE),
+    n_sims      = sum(!is.na(p))
+  )
+
+df_kinetics_month3 <- tibble(
+  hypothesis = hypothesis[idx],
+  baseline   = factor(baseline[idx], levels = c("Low", "Medium", "High")),
+  raw_auc    = raw_AUC_res,
+  norm_auc   = norm_AUC_res,
+  half_life  = half_life_res
+) |>
+  summarise(
+    .by = c(hypothesis, baseline),
+    raw_auc   = mean(raw_auc, na.rm = TRUE),
+    norm_auc  = mean(norm_auc, na.rm = TRUE),
+    half_life = mean(half_life, na.rm = TRUE)
+  )
+
+saveRDS(
+  list(power = gts_power_month3, kinetics = df_kinetics_month3, alpha = alpha),
+  "data/sim_results_month3.RDS"
+)
 ```
 
 

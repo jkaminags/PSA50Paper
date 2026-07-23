@@ -1,5 +1,6 @@
 library(tidyverse)
-library(fda.usc) # for simpson estimation
+# int.simpson2() (AUC estimation) is called via fda.usc::. Attaching the whole
+# package masks dplyr::select, which breaks the test functions below.
 source("polynomial_PSA.R")
 
 # Generates a simulated PSA database
@@ -346,7 +347,7 @@ raw_auc_calc <- function(df_psa_sim) {
     df_patient <- df_psa_sim |> 
       filter(id == i)
     
-    auc_current <- int.simpson2(df_patient$time,
+    auc_current <- fda.usc::int.simpson2(df_patient$time,
                                 df_patient$PSA,
                                 equi = FALSE,
                                 method = "ESR")
@@ -367,7 +368,7 @@ norm_auc_calc <- function(df_psa_sim) {
     df_patient <- df_psa_sim |> 
       filter(id == i)
     
-    auc_current <- int.simpson2(df_patient$time,
+    auc_current <- fda.usc::int.simpson2(df_patient$time,
                                 df_patient$PSA,
                                 equi = FALSE,
                                 method = "ESR")

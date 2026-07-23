@@ -6,3 +6,9 @@ resources/
 # OS / R session junk
 .DS_Store
 .Rhistory
+
+# Quarto rendered outputs
+/index.pdf
+/index_files/
+*_files/
+.quarto/

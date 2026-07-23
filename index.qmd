@@ -1,5 +1,5 @@
 ---
-title: "PSA50 is a Statistically Inefficient and Information-Losing Endpoint"
+title: "PSA50 and PSA Doubling Time are Statistically Inefficient and Information-Losing Endpoints"
 author:
     - name: Josephine Kaminaga
       corresponding: true
@@ -21,6 +21,7 @@ library(gt)
 
 eff <- readRDS("simulations/data/sim_results_efficiency.RDS")
 rob <- readRDS("simulations/data/sim_results_robustness.RDS")
+kin <- readRDS("simulations/data/sim_results_kinetics.RDS")
 
 test_labels <- c(
   log_ancova = "Log-scale ANCOVA",
@@ -33,6 +34,18 @@ test_labels <- c(
 scale_of <- c(log_ancova = "log", log_ratio = "log",
               perchange = "percent", fisher = "percent (binary)",
               ancova = "raw", rawchange = "raw")
+
+# progression side: analyses of the slope functional
+kin_labels <- c(
+  slope_t     = "Log-PSA growth rate (t-test)",
+  log_psadt_t = "Log doubling time (t-test)",
+  psadt_t     = "Doubling time (t-test)",
+  raw_slope_t = "Raw PSA slope (t-test)",
+  fisher_dt   = "Rapid vs slow flag (Fisher exact)"
+)
+kin_scale_of <- c(slope_t = "log (rate)", log_psadt_t = "log (reciprocal)",
+                  psadt_t = "reciprocal", raw_slope_t = "raw",
+                  fisher_dt = "reciprocal (binary)")
 
 h        <- eff$headline
 nf       <- round(as.numeric(h$n_star_fisher))
@@ -86,17 +99,90 @@ rob_tbl <- rob$robustness |>
   select(analysis, scenario, cal_power) |>
   pivot_wider(names_from = scenario, values_from = cal_power) |>
   arrange(analysis)
+
+# ---- progression side: PSA doubling time -------------------------------------
+km  <- kin$meta
+kh  <- kin$headline
+knf <- round(as.numeric(kh$n_star_flag))
+kns <- round(as.numeric(kh$n_star_slope))
+kmult <- as.numeric(kh$multiplier)
+kdisc <- as.numeric(kh$discarded_frac)
+dt0 <- km$dt0; dt1 <- km$dt1
+dt_ratio_pct <- round((dt1 / dt0 - 1) * 100)
+k_months <- max(km$times)
+k_visits <- length(km$times)
+
+kstep  <- function(s) round(kin$decomp$patients_per_arm[kin$decomp$step == s])
+k_dich <- kstep("dichotomization")
+k_scale <- kstep("scale")
+k_logdt <- kstep("log_dt")
+
+knstar_tbl <- kin$nstar |>
+  mutate(analysis = kin_labels[test], scale = kin_scale_of[test],
+         relative = n_star / kns) |>
+  arrange(n_star) |>
+  select(analysis, scale, n_star, relative)
+
+p_kpower <- kin$curve |>
+  mutate(test = factor(kin_labels[test], levels = kin_labels)) |>
+  ggplot(aes(n, cal_power, color = test)) +
+  geom_hline(yintercept = km$target, linetype = 2, color = "grey55") +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 1) +
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent_format()) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Patients per arm", y = "Power (calibrated to 10% type I error)",
+       color = NULL) +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(), legend.position = "right")
+
+# undefined doubling times: non-positive estimated slope, by design and assay noise
+und <- kin$undefined_frac
+und_lo <- min(und$frac_capped) * 100
+und_hi <- max(und$frac_capped) * 100
+und_hi_row <- und[which.max(und$frac_capped), ]
+und_lo_row <- und[which.min(und$frac_capped), ]
+
+kin_panel_tbl <- kin$kinetics_panel |>
+  select(months, s_e, test, cal_power) |>
+  pivot_wider(names_from = test, values_from = cal_power) |>
+  left_join(und, by = c("months", "s_e")) |>
+  arrange(s_e, months)
+
+krob_tbl <- kin$robustness |>
+  mutate(analysis = factor(kin_labels[test], levels = kin_labels)) |>
+  select(analysis, scenario, cal_power) |>
+  pivot_wider(names_from = scenario, values_from = cal_power) |>
+  arrange(analysis)
+
+lmmp <- kin$lmm_panel
+lmm_get <- function(sched, tst) {
+  lmmp$cal_power[lmmp$schedule == sched & lmmp$test == tst]
+}
+lmm_bal_two <- lmm_get("Balanced (5 visits)", "slope_t")
+lmm_bal_mm  <- lmm_get("Balanced (5 visits)", "lmm")
+lmm_dro_two <- lmm_get("Dropout (2-5 visits)", "slope_t")
+lmm_dro_mm  <- lmm_get("Dropout (2-5 visits)", "lmm")
+
+krob_get <- function(scen, tst) {
+  kin$robustness$cal_power[kin$robustness$scenario == scen & kin$robustness$test == tst]
+}
+kr_ht_flag <- krob_get("6 months, heavy-tailed", "fisher_dt")
+kr_ht_dt   <- krob_get("6 months, heavy-tailed", "psadt_t")
+kr_ht_slope <- krob_get("6 months, heavy-tailed", "slope_t")
 ```
 
 ## Abstract
 
-Prostate-specific antigen (PSA) response, usually defined as a decline of at least 50% from baseline (PSA50), is among the most common endpoints in prostate cancer trials, reported as the proportion of responders and compared between arms with a Fisher exact test. The endpoint makes two separate design choices that harm a trial along two independent axes. It analyzes change on the percentage scale, which depends on baseline PSA, is right-skewed, and is prone to regression to the mean; this costs statistical efficiency. And it dichotomizes a continuous trajectory into a yes-or-no flag, so that a 51% and a 95% decline count the same; this discards the shape of the response. Using a simulation calibrated so that every test controls type I error at the same level, we quantify the efficiency cost. To reach 80% power for a `r round(delta_sp)`-sympercent treatment effect, PSA50 needs about `r nf` patients per arm against about `r nl` for baseline-adjusted analysis of covariance on the log scale, a `r round(mult, 1)`-fold difference, equivalent to discarding roughly half the trial. Decomposing the gap shows that nearly all of it comes from the percentage-change scale rather than from dichotomization: a continuous percentage-change analysis, the usual alternative to a responder proportion, is almost as inefficient as PSA50 itself. The log-scale advantage is a regression-to-the-mean effect and persists under raw-additive treatment effects and heavy-tailed error. Dichotomization's distinctive cost is not power but information, because it erases the response kinetics that a continuous analysis keeps. We recommend analyzing PSA with log-scale analysis of covariance, reporting the effect as a symmetric percentage difference, and pairing it with kinetic summaries such as the area under the PSA curve. These choices keep the clinical meaning of a PSA decline while recovering the efficiency and the response-shape information PSA50 removes.
+Prostate cancer trials read prostate-specific antigen (PSA) two ways. Response endpoints, most often a decline of at least 50% from baseline (PSA50), ask how far PSA fell. Progression endpoints, most often PSA doubling time, ask how fast it is rising. The two are used in different diseases and answer different questions, but they are summaries of the same underlying object, a patient's log-PSA trajectory, and they are built by making the same two choices: each expresses the trajectory on a distorting scale, and each is then compared against a threshold. Using simulations calibrated so that every test controls type I error at the same level, we quantify what those choices cost. On the response side, reaching 80% power for a `r round(delta_sp)`-sympercent treatment effect takes about `r nf` patients per arm with PSA50 against about `r nl` with baseline-adjusted analysis of covariance on the log scale, a `r round(mult, 1)`-fold difference. On the progression side, detecting a slowing of median doubling time from `r dt0` to `r dt1` months takes about `r knf` patients per arm with a rapid-versus-slow flag against about `r kns` with a test on the log-scale growth rate, a `r sprintf("%.2f", kmult)`-fold difference. Both decompositions point the same way. Thresholding costs little power on its own, about `r d_dich` and `r k_dich` patients per arm respectively; the scale costs most of the rest. Percentage change is inefficient because it divides by a noisy baseline, and doubling time because it inverts a slope, which is undefined for the `r sprintf("%.0f", und_lo)`% to `r sprintf("%.0f", und_hi)`% of patients whose PSA is not rising. Simply analyzing doubling times on the log scale recovers about `r k_logdt` of the `r k_scale` patients per arm the reciprocal costs. What thresholding uniquely destroys is not power but information, because it erases the shape of the trajectory. We recommend analyzing the trajectory on the log scale, with analysis of covariance for response and a mixed model for growth rate, reporting effects as a symmetric percentage difference and a doubling-time ratio, and pairing them with kinetic summaries such as the area under the PSA curve. These analyses keep the clinical meaning clinicians expect while recovering the efficiency and the trajectory information the conventional endpoints remove.
 
 ## Background
 
 A commonly used endpoint in prostate cancer clinical trials is a decline of at least 50% in prostate-specific antigen (PSA) from baseline, known as PSA50. The endpoint is popular in part because it is easy to compute and gives a single, intuitive summary of whether a treatment lowered a patient's PSA. Its reach is wide: a search of PubMed identified 93 of 197 prostate cancer clinical trials published in 2024 that used PSA50 as a primary or secondary endpoint, and 866 of 3,515 prostate cancer trials registered on ClinicalTrials.gov made similar use of it [@kaminaga_2025_search_pubmed; @kaminaga_2025_search_psa; @kaminaga_2025_search_ct].
 
 That convenience carries a cost with two distinct sources, because PSA50 makes two separate design choices. It thresholds a particular quantity, percentage change from baseline, which is a poor analytic scale in its own right; and it dichotomizes a continuous PSA trajectory into a yes-or-no flag. These choices harm a trial along two independent axes. One is statistical efficiency: the trial needs more patients than it should to detect a given treatment effect. The other is clinical information: the endpoint hides the shape of a patient's response. Separating the two clarifies both what is wrong and what to do instead, and, as our simulation shows, most of the efficiency loss traces to the scale while the information loss traces to the dichotomization.
+
+Neither problem is specific to PSA50, and seeing why requires a step back. What a trial actually observes is a patient's PSA measured repeatedly over time, a trajectory that on the log scale is close to a straight line. Every PSA endpoint is a summary of that one trajectory, and different endpoints read different features of it. Response endpoints such as PSA50 read how far the curve fell, a contrast between two levels. Progression endpoints such as PSA doubling time read how steeply the curve climbs, a slope. The area under the PSA curve reads the whole thing. Because these are summaries of a common object, the design choices that damage one can damage another, and PSA doubling time is damaged in exactly the two ways PSA50 is. It is expressed on a distorting scale, since a doubling time is the reciprocal of a slope, and it is routinely compared against a threshold, so that patients are labeled rapid or slow. We therefore treat the two endpoints together: PSA50 as the worked example, and doubling time as the case that shows the problem belongs to the trajectory rather than to any single endpoint.
 
 Consider dichotomization first. A patient whose PSA falls by 51% and a patient whose PSA falls by 95% are both counted as responders, while a patient whose PSA falls by 49% is grouped with a patient whose PSA did not move at all. Splitting a continuous measurement into two bins this way throws away information. For a continuous predictor, dichotomizing at the median keeps roughly two thirds of the information when the variable is symmetric and closer to half when it is right-skewed, as PSA is [@royston_2006_dichotomizing; @altman_2006_cost]. Those figures describe dichotomizing a predictor rather than an outcome, so they carry over to PSA50 by analogy rather than by direct measurement, but the mechanism is the same. In metastatic castration-resistant prostate cancer specifically, @grayling_2022_improving showed that recovering the continuous PSA data underneath the binary flag roughly doubled the effective sample size of a PSA response analysis, a median efficiency gain of 103.2%. As our results below make precise, that gain comes from analyzing the continuous data on a good scale, more than from the act of not dichotomizing on its own.
 
@@ -215,7 +301,11 @@ p
 
 The second design choice, the scale, is independent of the first and is where most of the statistical inefficiency lives. Suppose we avoid dichotomizing and analyze percentage change from baseline directly, as a continuous outcome. Percentage change is still a difficult scale for PSA. Because it is expressed relative to each patient's own baseline, it treats unequal changes as equal: a patient starting at 50 ng/mL who falls to 25 ng/mL and a patient starting at 4 ng/mL who falls to 2 ng/mL both record a 50% decline, despite absolute reductions that differ by more than an order of magnitude. Percentage change is also bounded, since PSA cannot go negative and so the largest possible decline is 100%. It is right-skewed, and its dependence on baseline invites regression to the mean, where patients with extreme baseline values tend to drift toward the average on their own. Simulation and applied work have repeatedly found percentage change from baseline to be the least efficient of the standard analysis choices and to lose power as baseline variability grows [@vickers_2001_the; @kaiser_1989_adjusting; @bland_2011_comparisons]. These are the papers most often cited against PSA50, but they address this second problem, the scale, rather than the first, the act of dichotomizing.
 
-The information axis is clinical rather than statistical, and it is the one we think matters most for what PSA50 uniquely destroys. PSA50 summarizes an entire response trajectory by a single threshold crossing, which erases the shape of the response. Two patients can share the same PSA50 status while following very different courses, one with a fast and deep decline and one that is slow and shallow, and PSA response kinetics of this kind carry prognostic information [CITATION NEEDED: PSA kinetics / response-curve prognosis, e.g. the sources noted in the project references]. Methods that recover the efficiency lost to the binary flag, as augmentation approaches do, do not recover this shape information, because they still estimate the responder proportion. Summaries of the trajectory itself, such as the area under the PSA curve and the PSA half-life, capture what the threshold discards.
+PSA doubling time repeats both choices in the setting where PSA is rising rather than falling. It is a well-established prognostic marker: after biochemical recurrence, how fast PSA rises predicts metastasis and prostate cancer-specific mortality [@pound_1999_natural; @freedland_2005_risk; @damico_2003_surrogate]. By convention it is computed by regressing the natural logarithm of PSA on time and dividing log 2 by the fitted slope [@arlen_2008_prostate]. That last step is the scale problem in a different guise. The slope is the quantity the regression estimates, it is well behaved, and it is the natural log-scale summary of how fast the disease is growing; the doubling time inverts it. Inverting a slope is not a neutral change of units. It is a nonlinear transformation that stretches the upper tail, and it fails outright when the fitted slope is zero or negative, in which case the doubling time is undefined or negative. The working group guideline that codifies the calculation acknowledges this case and offers no remedy for it [@arlen_2008_prostate], and the choice of calculation method is itself consequential, with more than twenty methods in use giving divergent results [@vickers_2012_psa; @svatek_2006_critical]. The threshold problem then arrives on top: doubling time is habitually split into rapid and slow. The cutpoint is entrenched enough to have governed eligibility for three registration trials in non-metastatic castration-resistant disease, all of which required a doubling time of 10 months or less [@smith_2018_apalutamide; @hussain_2018_enzalutamide; @fizazi_2019_darolutamide], and prognostic studies routinely report it in bins [@freedland_2005_risk].
+
+The alternative on the progression side is the one the response side points to. Modeling log PSA over time with a mixed-effects model, and comparing the growth rate between arms, keeps the well-behaved quantity and never needs the reciprocal. Longitudinal models of this kind have a long history in prostate disease [@pearson_1994_mixed; @proustlima_2009_development], and when they have been compared directly with conventional doubling-time calculations they have predicted survival substantially better [@svatek_2006_critical]. The growth rate back-transforms to a ratio of doubling times, so the clinically familiar quantity survives as the reported effect even though it is not the analytic scale.
+
+The information axis is clinical rather than statistical, and it is the one we think matters most for what a threshold uniquely destroys. PSA50 summarizes an entire response trajectory by a single threshold crossing, which erases the shape of the response. Two patients can share the same PSA50 status while following very different courses, one with a fast and deep decline and one that is slow and shallow. That the shape carries prognostic information is not in doubt on the progression side, where the rate of change of PSA predicts metastasis and mortality [@pound_1999_natural; @freedland_2005_risk], and models that use the whole post-treatment trajectory rather than a single summary predict recurrence better than those that do not [@proustlima_2009_development]. The same logic applies to a rapid-versus-slow doubling-time flag, which discards the rate it was derived from. Methods that recover the efficiency lost to a binary flag, as augmentation approaches do, do not recover this shape information, because they still estimate the responder proportion. Summaries of the trajectory itself, such as the area under the PSA curve and the PSA half-life, capture what the threshold discards.
 
 A better analysis of PSA change should keep the clinical interpretability of a percentage decline, adjust properly for baseline, respect the skewed distribution of PSA, and reach conventional trial operating characteristics. We recommend analyzing PSA on the log scale, where its distribution is closer to normal and its relationship with baseline closer to linear, using analysis of covariance of the form `log(follow-up) ~ log(baseline) + group`. This adjusts for baseline rather than assuming that subtracting it is correct, which is the assumption a change score makes and the one regression to the mean violates. The group effect back-transforms to a symmetric percentage difference [@cole_2000_sympercents], preserving the interpretable relative-change number that makes PSA50 attractive, and we supplement it with kinetic summaries that describe the response shape.
 
@@ -227,7 +317,9 @@ To gauge how often PSA response endpoints are used, we searched PubMed for prost
 
 ### Recommended analysis
 
-The endpoint we recommend for inference is analysis of covariance on the log scale, `log(follow-up) ~ log(baseline) + group`. The log scale addresses the skewed distribution of PSA, which in metastatic disease routinely spans several orders of magnitude, and it linearizes the follow-up-versus-baseline relationship so that the covariance adjustment is appropriate. Adjusting for baseline, rather than analyzing a change score, removes the regression-to-the-mean bias that a difference-based analysis carries [@kaiser_1989_adjusting; @vickers_2001_analysing]. We report the estimated group effect back-transformed to a symmetric percentage difference on the 100 log scale [@cole_2000_sympercents], which gives a relative-change number that is additive and symmetric, unlike ordinary percentage change. Because the log-scale ANCOVA still reduces each patient to a single follow-up value, we pair it with kinetic summaries, the area under the PSA curve (raw and baseline-normalized) and the PSA half-life, which describe the response trajectory that a single-timepoint analysis cannot.
+For a response endpoint, the analysis we recommend for inference is analysis of covariance on the log scale, `log(follow-up) ~ log(baseline) + group`. The log scale addresses the skewed distribution of PSA, which in metastatic disease routinely spans several orders of magnitude, and it linearizes the follow-up-versus-baseline relationship so that the covariance adjustment is appropriate. Adjusting for baseline, rather than analyzing a change score, removes the regression-to-the-mean bias that a difference-based analysis carries [@kaiser_1989_adjusting; @vickers_2001_analysing]. We report the estimated group effect back-transformed to a symmetric percentage difference on the 100 log scale [@cole_2000_sympercents], which gives a relative-change number that is additive and symmetric, unlike ordinary percentage change. Because the log-scale ANCOVA still reduces each patient to a single follow-up value, we pair it with kinetic summaries, the area under the PSA curve (raw and baseline-normalized) and the PSA half-life, which describe the response trajectory that a single-timepoint analysis cannot.
+
+For a progression endpoint, the corresponding recommendation is a linear mixed model for log PSA over time, `log(PSA) ~ time × group + (time | patient)`, with the treatment effect read off the group-by-time interaction [@pearson_1994_mixed]. This estimates the difference in log-scale growth rate directly from every measurement, rather than reducing each patient to one doubling time and then comparing those. It needs no reciprocal, so it is defined for patients whose PSA is flat or falling, and it handles the irregular visit schedules real trials produce. The estimated growth rates back-transform to a ratio of median doubling times, which keeps the number clinicians are used to reading without making it the analytic scale.
 
 ### Simulation study
 
@@ -239,7 +331,19 @@ Two features make the comparison fair. First, the tests differ in how conservati
 
 To separate the two axes, we decompose the sample-size gap between PSA50 and the recommended analysis into the part removed by undichotomizing (PSA50 to a continuous percentage-change test) and the part removed by fixing the scale and adjusting for baseline (percentage change to log-scale ANCOVA). We probe the scale mechanism by varying the baseline-follow-up correlation and the spread of baseline PSA, the conditions that govern regression to the mean. Finally, because the reference model favors the log scale by assumption, we re-run the comparison under two perturbations a skeptic would demand: a treatment effect that is additive on the raw ng/mL scale rather than multiplicative, and heavy-tailed (Student *t* with 3 degrees of freedom) measurement error, crossed in a two-by-two design.
 
+### Simulation study: the progression endpoint
+
+The same apparatus applies to the slope functional once the trajectory is generated over more than two timepoints. We simulate quarterly PSA measurements over `r k_months` months (`r k_visits` visits) under the standard log-linear growth model: each patient has a log baseline and a personal growth rate, `log(PSA)` is linear in time, and measurement error is added on the log scale. Baseline PSA has a median of `r round(exp(km$mu_a))` ng/mL, matching the biochemical-recurrence setting where doubling time is used, and the control arm's median doubling time is `r dt0` months. Treatment slows the rise to a median doubling time of `r dt1` months, a `r dt_ratio_pct`% increase.
+
+We compare five analyses: Fisher's exact test on a rapid-versus-slow flag, the progression analog of PSA50; a *t*-test on each patient's estimated doubling time; a *t*-test on the log doubling time, included to isolate how much of the reciprocal's cost is fixed simply by taking a logarithm; a *t*-test on each patient's raw ng/mL-per-month slope; and a *t*-test on each patient's log-scale growth rate, the recommended quantity. As on the response side, every test is size-adjusted to `r alpha_pct`% type I error and we read off the patients per arm needed for 80% power, with `r format(km$M, big.mark = ",")` replications per scenario.
+
+Three design choices keep the comparison fair to the endpoint we are criticizing. We set the rapid-versus-slow threshold at `r km$dt_cut` months, equal to the control arm's median doubling time, so exactly half the control arm is flagged, the point most favorable to a binary test. Patients whose PSA is not rising have a negative or undefined doubling time; we follow practice and cap them at `r km$dt_cap` months rather than discarding them, which compresses the upper tail and so lowers the variance of the doubling-time *t*-test. And we calibrate the discrete flag test up to the nominal level, removing the penalty it pays for conservatism.
+
+Because a doubling time is estimated per patient and then compared across arms, it is a two-stage summary statistic. We therefore also fit the linear mixed model `log(PSA) ~ time × group + (time | patient)`, which estimates the group difference in growth rate directly, and compare it with the two-stage *t*-test under a balanced visit schedule and under dropout, where patients contribute between two and `r k_visits` visits. We probe the scale mechanism by crossing follow-up duration (6, `r k_months`, and 24 months) with assay and biological variability, recording both power and the fraction of patients whose doubling time is undefined, and we repeat the duration sweep under heavy-tailed (Student *t* with 3 degrees of freedom) measurement error.
+
 ## Results
+
+### The response endpoint: PSA50
 
 After calibration, every test controlled type I error at the nominal `r alpha_pct`%, so the power comparison reflects how well each analysis uses the data rather than how conservative it is. We report results for a treatment effect of `r round(delta_sp)` sympercents, a `r delta_pc`% lower geometric-mean PSA on treatment.
 
@@ -310,20 +414,91 @@ rob_tbl |>
   tab_options(table.font.size = pct(90))
 ```
 
+### The progression endpoint: PSA doubling time
+
+The progression side reproduces the response side's pattern on a different functional and in a different disease setting. Every test again controlled type I error at the nominal `r alpha_pct`% after calibration. To detect a slowing of median doubling time from `r dt0` to `r dt1` months, the rapid-versus-slow flag needs about `r knf` patients per arm against about `r kns` for a test on the log-scale growth rate, a `r sprintf("%.2f", kmult)`-fold difference (@fig-kpower, @tbl-knstar). Analyzing the raw ng/mL-per-month slope is far worse still, at about `r round(knstar_tbl$n_star[knstar_tbl$analysis == kin_labels["raw_slope_t"]])` patients per arm, which is the same verdict the response side returns on raw-scale analyses.
+
+```{r}
+#| label: fig-kpower
+#| fig-cap: !expr paste0("Calibrated power versus sample size per arm for the progression endpoint, detecting a slowing of median PSA doubling time from ", dt0, " to ", dt1, " months. Every test is size-adjusted to ", alpha_pct, "% type I error. The dashed line marks 80% power.")
+#| echo: FALSE
+#| message: FALSE
+#| fig-width: 7
+#| fig-height: 4
+p_kpower
+```
+
+```{r}
+#| label: tbl-knstar
+#| tbl-cap: "Patients per arm needed for 80% power on the progression endpoint, with sample size relative to the log-scale growth rate."
+#| echo: FALSE
+knstar_tbl |>
+  gt() |>
+  fmt_number(columns = n_star, decimals = 0) |>
+  fmt_number(columns = relative, decimals = 2) |>
+  cols_label(analysis = "Analysis", scale = "Change scale",
+             n_star = "Patients per arm", relative = "× vs growth rate") |>
+  tab_options(table.font.size = pct(90))
+```
+
+Decomposing the gap gives the same answer as before, and gives it more sharply. Undichotomizing the rapid-versus-slow flag into a continuous doubling-time *t*-test recovers only about `r k_dich` patients per arm. Moving from the doubling time to the growth rate recovers about `r k_scale` more. As on the response side, the threshold is nearly free in power terms and the scale is expensive; here the continuous doubling-time analysis is within a few patients per arm of the binary flag it was meant to improve on.
+
+The practical part of that decomposition is how cheaply the scale problem is fixed. Simply taking the logarithm of the doubling time, leaving everything else about the analysis alone, recovers about `r k_logdt` of the `r k_scale` patients per arm. The reciprocal, not the doubling time concept, is what costs the trial. A trial that wants to keep reporting doubling times can recover most of the available efficiency by analyzing them on the log scale.
+
+The mechanism is visible in how often the reciprocal fails outright. A patient whose PSA is not rising has a negative or undefined doubling time, and the shorter the follow-up and the noisier the assay, the more often that happens: from `r sprintf("%.1f", und_lo)`% of patients at `r und_lo_row$months` months of follow-up with the lower measurement variability, to `r sprintf("%.1f", und_hi)`% at `r und_hi_row$months` months with the higher (@tbl-kpanel). At the short end, roughly one patient in five has no computable doubling time and must be handled by convention. The growth rate has no such failure mode: a flat or falling PSA is simply a growth rate at or below zero. Across the panel the growth rate's power advantage over the doubling time is stable rather than growing, between `r sprintf("%.2f", min(kin_panel_tbl$slope_t - kin_panel_tbl$psadt_t))` and `r sprintf("%.2f", max(kin_panel_tbl$slope_t - kin_panel_tbl$psadt_t))`, so the reciprocal's cost is better read as this loss of definition than as a gradient in power.
+
+```{r}
+#| label: tbl-kpanel
+#| tbl-cap: "Calibrated power at 100 patients per arm for the progression endpoint, by follow-up duration and within-patient variability, with the fraction of patients whose estimated PSA slope is non-positive and whose doubling time is therefore undefined."
+#| echo: FALSE
+kin_panel_tbl |>
+  select(months, s_e, frac_capped, fisher_dt, psadt_t, log_psadt_t, slope_t) |>
+  gt() |>
+  fmt_number(columns = c(fisher_dt, psadt_t, log_psadt_t, slope_t), decimals = 2) |>
+  fmt_percent(columns = frac_capped, decimals = 1) |>
+  cols_label(months = "Follow-up (months)", s_e = "Within-patient SD (log)",
+             frac_capped = "Undefined PSADT", fisher_dt = "Rapid/slow flag",
+             psadt_t = "Doubling time", log_psadt_t = "Log doubling time",
+             slope_t = "Growth rate") |>
+  tab_options(table.font.size = pct(90))
+```
+
+Because a doubling time is computed per patient and then compared across arms, it is a two-stage summary statistic, and how much that costs depends on the visit schedule. Under a balanced schedule the two approaches are indistinguishable: the two-stage *t*-test on growth rates and the linear mixed model both reach `r sprintf("%.2f", lmm_bal_two)` calibrated power at 80 patients per arm, as theory predicts, since with equal visits every patient's slope carries equal precision and the simple average is already optimal. Under dropout, where patients contribute between two and `r k_visits` visits and their slopes carry very different precision, the two separate: `r sprintf("%.2f", lmm_dro_two)` for the two-stage *t*-test against `r sprintf("%.2f", lmm_dro_mm)` for the mixed model. The mixed model's advantage is not that it uses a better scale, which the two-stage test already does, but that it weights unequally informative patients correctly. In trials with complete and regular PSA sampling the simpler analysis loses nothing; in the incomplete sampling real trials have, the mixed model is the safer default.
+
+Finally, the progression result survives the same perturbations (@tbl-krobust). Across follow-up durations and under heavy-tailed measurement error, the log-scale analyses stayed ahead of the doubling-time and raw-slope analyses throughout. The binary flag showed the same single virtue it showed on the response side: under heavy-tailed error at the shortest follow-up it edged out the continuous doubling-time *t*-test, `r sprintf("%.2f", kr_ht_flag)` against `r sprintf("%.2f", kr_ht_dt)`, because thresholding is insensitive to the extreme values that a reciprocal manufactures. It remained behind the growth rate at `r sprintf("%.2f", kr_ht_slope)`.
+
+```{r}
+#| label: tbl-krobust
+#| tbl-cap: "Calibrated power at 100 patients per arm for the progression endpoint, by follow-up duration and error distribution."
+#| echo: FALSE
+krob_tbl |>
+  gt(rowname_col = "analysis") |>
+  fmt_number(columns = where(is.numeric), decimals = 2) |>
+  tab_options(table.font.size = pct(90))
+```
+
 ## Discussion
 
-The two axes lead to two recommendations. On efficiency, the analysis should not live on the percentage-change scale, whether as the binary PSA50 flag or as a continuous percentage-change comparison, because both need roughly twice the sample of a log-scale analysis. It should be a baseline-adjusted analysis on the log scale, reported as a symmetric percentage difference so that the clinical interpretation survives. On information, because dichotomization is what erases the shape of the response, the trajectory itself should be reported alongside the primary analysis, through kinetic summaries such as the area under the PSA curve and the PSA half-life. The efficiency case is settled by the analysis choice; the information case is not something any single-timepoint analysis can recover.
+The two axes lead to two recommendations, and they hold for both endpoints. On efficiency, the analysis should live on the log scale, which for a response endpoint means a baseline-adjusted analysis of covariance reported as a symmetric percentage difference, and for a progression endpoint means a mixed model for the growth rate reported as a doubling-time ratio. Neither the percentage-change scale nor the reciprocal scale should carry the primary analysis. On information, because thresholding is what erases the shape of the trajectory, the trajectory itself should be reported alongside the primary analysis, through kinetic summaries such as the area under the PSA curve and the PSA half-life. The efficiency case is settled by the analysis choice; the information case is not something any single-number summary can recover.
 
-A finding worth stating plainly is that in power terms the dichotomization is nearly free, while the scale is expensive. This refines rather than contradicts the efficiency literature. @grayling_2022_improving recover a large efficiency gain by using the continuous PSA data beneath the binary flag; our decomposition shows that the gain comes from analyzing that continuous data well, on the right scale, more than from undichotomizing on the percentage scale, where the continuous analysis is almost as inefficient as the flag. The practical warning is that a trial swapping PSA50 for a continuous percentage-change analysis, a common first move, buys almost none of the available efficiency. The log scale is the lever.
+In power terms the threshold is nearly free and the scale is expensive. We did not expect that to reproduce as closely as it did. The two simulations share no generative model, no clinical setting, and no direction of PSA change, yet dichotomization cost about `r d_dich` patients per arm on the response side and about `r k_dich` on the progression side, while the scale cost about `r d_scale + d_adj` and about `r k_scale`. That the same asymmetry appears twice suggests it is a property of how these endpoints are constructed rather than a feature of either setting.
+
+This refines rather than contradicts the efficiency literature. @grayling_2022_improving recover a large efficiency gain by using the continuous PSA data beneath the binary flag; our decomposition shows that the gain comes from analyzing that continuous data well, on the right scale, more than from undichotomizing on the percentage scale, where the continuous analysis is almost as inefficient as the flag. The practical warning is that a trial swapping PSA50 for a continuous percentage-change analysis, a common first move, buys almost none of the available efficiency. The same warning applies to replacing a rapid-versus-slow flag with a doubling-time *t*-test. The log scale is the lever in both cases.
+
+The two scales fail for different reasons, and the distinction matters for anyone trying to apply this elsewhere. Percentage change is inefficient because it divides by a noisy baseline, so its variance inflates precisely when regression to the mean is strongest; the fix is to adjust for baseline instead of dividing by it. Doubling time is inefficient because it inverts a slope, which stretches the upper tail and is undefined whenever PSA is not rising; the fix is to stop inverting. Grouping these as one mechanism would be wrong even though the remedy, work on the log scale, is the same. The practical difference is visible in how cheaply each is repaired: on the progression side, taking the logarithm of the doubling time and changing nothing else recovers most of the loss, because the reciprocal's damage is largely distributional. No comparable one-step fix exists for percentage change, where the baseline dependence has to be modeled rather than transformed away.
 
 Our recommendation is complementary to augmentation rather than a replacement for it. @grayling_2022_improving keep the binary PSA50 estimand and make its estimation far more efficient by recovering the continuous data beneath the flag. Where investigators are committed to reporting a responder proportion, augmentation is the better way to estimate it than a raw count. What augmentation does not do is change the estimand: it still targets the proportion of patients who cross the 50% threshold, so it inherits the endpoint's blindness to response shape. Our contribution is to argue that the shape is worth analyzing directly, and to give a baseline-adjusted, interpretable way to do so.
 
-Two cautions bound what the literature supports. First, the information-retention figures from the dichotomization literature (roughly two thirds for symmetric data, roughly half for skewed) were derived for dichotomizing a predictor, not an outcome; we use them to describe the mechanism, and rely on our own simulation and on @grayling_2022_improving for the outcome-specific magnitude in PSA. Second, the well-known result that data-derived cutpoints inflate false-positive rates does not apply here, because the 50% threshold is a fixed convention rather than one chosen from the data. The argument against PSA50 is loss of efficiency and information, not cutpoint-induced bias.
+Several cautions bound what the literature supports. First, the information-retention figures from the dichotomization literature (roughly two thirds for symmetric data, roughly half for skewed) were derived for dichotomizing a predictor, not an outcome; we use them to describe the mechanism, and rely on our own simulation and on @grayling_2022_improving for the outcome-specific magnitude in PSA. Second, the well-known result that data-derived cutpoints inflate false-positive rates does not apply here, because neither the 50% decline nor the 10-month doubling time is chosen from the data; both are fixed conventions. The argument against these endpoints is loss of efficiency and information, not cutpoint-induced bias.
 
-The efficiency estimate has boundaries worth naming. The `r round(mult, 1)`-fold figure is specific to a 50% control-arm responder fraction and a moderate treatment effect; the multiplier is stable across the correlation and baseline-spread conditions we varied, but a trial with responders concentrated near 0% or 100% would see the dichotomization cost grow, widening the gap further. The simulation also measures a single follow-up timepoint, so it speaks to the efficiency axis and not the information axis; quantifying how much prognostic signal the kinetic summaries carry, and building a per-arm test of the area under the PSA curve, is the natural next step and the one that would let the information argument be tested directly rather than argued from the trajectory's face.
+Third, we are making a narrower claim about doubling time than the existing skeptical literature might suggest. PSA velocity and doubling time have been criticized as predictors in the pretreatment and screening setting [@vickers_2009_systematic; @obrien_2009_pretreatment], and that criticism is not ours to borrow: in the recurrent and advanced disease we are concerned with, the prognostic value of PSA kinetics is well established and we do not dispute it. Our argument is that a quantity worth measuring is being measured on the wrong scale. We cite @vickers_2012_psa only for the setting-independent point that calculation methods proliferate and disagree. Finally, we are not aware of prior work framing the doubling time as a reciprocal reparametrization of the growth rate, so that argument rests on the derivation and simulation presented here rather than on established results, and it deserves the scrutiny that a new claim invites.
 
-For a trialist, the consequence is concrete. A field that adopts a continuous, baseline-adjusted primary analysis on the log scale, reported as a symmetric percentage difference and paired with kinetic secondary endpoints, would roughly halve the sample size its PSA analyses require while keeping the clinical meaning clinicians expect and recovering the response shape the binary endpoint discards. For a patient, the same shift means the trajectory of their response, how fast and how deep, is treated as information rather than rounded to a yes or no.
+The efficiency estimates have boundaries worth naming. The `r round(mult, 1)`-fold figure for PSA50 is specific to a 50% control-arm responder fraction and a moderate treatment effect; the multiplier is stable across the correlation and baseline-spread conditions we varied, but a trial with responders concentrated near 0% or 100% would see the dichotomization cost grow, widening the gap further. The `r sprintf("%.2f", kmult)`-fold figure for doubling time is similarly tied to its own favorable case, a threshold placed at the control arm's median so that exactly half the control arm is flagged. Both simulations reduce each arm to a single test of a single quantity, so they speak to the efficiency axis and not the information axis. Quantifying how much prognostic signal the kinetic summaries carry, and building a per-arm test of the area under the PSA curve, is the natural next step and the one that would let the information argument be tested directly rather than argued from the trajectory's face.
+
+Our progression model also assumes log-linear growth, which is the assumption the conventional doubling-time calculation already makes [@arlen_2008_prostate], so the comparison is on the ground the endpoint chooses for itself. Real post-treatment PSA can be biphasic, and a mixed model extends to that case while a doubling time does not, which if anything understates the advantage we report.
+
+For a trialist, the consequence is concrete. A field that adopts continuous, log-scale primary analyses, reported as a symmetric percentage difference for response and a doubling-time ratio for progression, and paired with kinetic secondary endpoints, would substantially cut the sample size its PSA analyses require while keeping the clinical meaning clinicians expect. For a patient, the same shift means the trajectory of their disease, how fast and how deep, is treated as information rather than rounded to a yes or no.
 
 ## Conclusion
 
-PSA50 is convenient, but the convenience comes from discarding information twice, once by dichotomizing and once by measuring change on a scale that depends on baseline. The two losses fall on different axes: the scale drives a roughly twofold loss of statistical efficiency, and the dichotomization erases the response kinetics that carry clinical meaning. For inference we recommend log-scale analysis of covariance, reported as a symmetric percentage difference, supplemented by kinetic summaries such as the area under the PSA curve. Where a responder proportion must still be reported for continuity with prior trials, it should be estimated with an augmented method rather than a raw count. These analyses retain the clinical meaning of a PSA response while recovering the efficiency and the response-shape information that the binary endpoint removes.
+PSA50 and PSA doubling time are convenient, and both convenience costs are paid the same way, by discarding information twice: once by comparing against a threshold, and once by measuring change on a scale that distorts it. The two losses fall on different axes. The scale drives the statistical inefficiency, roughly twofold for PSA50 and `r sprintf("%.2f", kmult)`-fold for the rapid-versus-slow flag, and the threshold erases the kinetics that carry clinical meaning. Because both endpoints are summaries of the same log-PSA trajectory, the remedy is the same in both settings: analyze the trajectory on the log scale, with analysis of covariance for a response endpoint and a mixed model for a progression endpoint, and report the effect in the units clinicians already use, a symmetric percentage difference or a ratio of doubling times. Where a responder proportion must still be reported for continuity with prior trials, it should be estimated with an augmented method rather than a raw count. These analyses retain the clinical meaning of a PSA response while recovering the efficiency and the trajectory information the conventional endpoints remove.
